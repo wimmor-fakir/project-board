@@ -491,6 +491,7 @@
     color:var(--ink-2);
   }
   .item-date.overdue{ color:var(--danger); font-weight:600; }
+  .item-code{ font-size:10.5px; color:var(--ink-3); }
   .item-date, .item-status{ cursor:pointer; }
   .item-date:hover{ text-decoration:underline; }
   .item-status:hover{ filter:brightness(0.95); }
@@ -1345,6 +1346,44 @@ function applyPhotoData(data){
   Object.keys(PHOTO_URIS).forEach(k => delete PHOTO_URIS[k]);
   Object.assign(PHOTO_URIS, data.photoUris);
 }
+
+/* ---------- Project / action codes ---------- */
+function nextProjectCode(name){
+  const letter = (name.trim()[0] || "X").toUpperCase();
+  let max = 0;
+  PROJECTS.forEach(p => {
+    if (p.code && p.code[0] === letter){
+      const n = parseInt(p.code.slice(1), 10);
+      if (!isNaN(n)) max = Math.max(max, n);
+    }
+  });
+  return letter + String(max + 1).padStart(2, "0");
+}
+function nextActionCode(projectCode){
+  const prefix = (projectCode || "XXX") + "-";
+  let max = 0;
+  ACTIONS.forEach(a => {
+    if (a.code && a.code.startsWith(prefix)){
+      const n = parseInt(a.code.slice(prefix.length), 10);
+      if (!isNaN(n)) max = Math.max(max, n);
+    }
+  });
+  return prefix + String(max + 1).padStart(3, "0");
+}
+function backfillCodes(){
+  let changed = false;
+  PROJECTS.forEach(p => {
+    if (!p.code){ p.code = nextProjectCode(p.name); changed = true; }
+  });
+  ACTIONS.forEach(a => {
+    if (!a.code){
+      const project = PROJECTS.find(p => p.id === (a.projectIds && a.projectIds[0]));
+      a.code = nextActionCode(project ? project.code : null);
+      changed = true;
+    }
+  });
+  return changed;
+}
 function currentBoardDataJson(){
   return JSON.stringify({ projects: PROJECTS, peopleOrder: PEOPLE_ORDER, healthOptions: HEALTH_OPTIONS, actionStatusOptions: ACTION_STATUS_OPTIONS, actions: ACTIONS });
 }
@@ -1377,12 +1416,17 @@ function setSaveStatus(state){
 }
 
 (async function initDbCapability(){
+  await Promise.resolve(); // defer past this script's synchronous top-level execution
   try {
     if (window.claude && typeof window.claude.use === "function") {
       dbCap = await window.claude.use("db");
     }
   } catch (e) { dbCap = null; }
-  if (!dbCap) return;
+  if (!dbCap) {
+    backfillCodes();
+    refreshAll();
+    return;
+  }
   try {
     const [dataSnap, photoSnap] = await Promise.all([
       dbCap.doc(BOARD_DATA_DOC).get(),
@@ -1395,15 +1439,13 @@ function setSaveStatus(state){
       applyingRemoteUpdate = false;
       try { localStorage.removeItem(STATE_KEY); } catch (e) {}
       usingLocalFallback = false;
-      refreshAll();
-    } else {
-      // First run for this artifact's database — seed it from the current state
-      // so the database becomes the source of truth from here on.
-      await dbCap.doc(BOARD_DATA_DOC).set(JSON.parse(currentBoardDataJson()));
-      await dbCap.doc(BOARD_PHOTOS_DOC).set(JSON.parse(currentPhotoDataJson()));
     }
+    // Backfill any missing project/action codes (also covers this artifact's
+    // very first run, seeding the database with the current — now coded — state).
+    backfillCodes();
     dbReady = true;
     setSaveStatus("saved");
+    refreshAll();
 
     dbCap.doc(BOARD_DATA_DOC).onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -1419,7 +1461,11 @@ function setSaveStatus(state){
       applyPhotoData(incoming);
       onRemoteDataChanged();
     }, () => {});
-  } catch (e) { dbReady = false; }
+  } catch (e) {
+    dbReady = false;
+    backfillCodes();
+    refreshAll();
+  }
 })();
 
 (async function initArtifactCapability(){
@@ -1614,7 +1660,7 @@ function buildTab(p){
     <span class="tab-dot" style="background:${health.color}"></span>
     <span class="tab-body">
       <div class="tab-name">${p.name}</div>
-      <div class="tab-meta">${health.label}</div>
+      <div class="tab-meta"><span class="mono">${p.code || ""}</span> · ${health.label}</div>
     </span>
     <span class="tab-count">${totalOpen}</span>
   `;
@@ -1719,6 +1765,7 @@ function buildSummaryCard(p, index, filtersActive){
     <div class="summary-grip" aria-hidden="true">⠿⠿</div>
     <div class="summary-main">
       <div class="summary-top">
+        <span class="mono" style="color:var(--ink-3); font-size:11.5px;">${p.code || ""}</span>
         <span class="summary-name status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status">${p.name}</span>
         <span class="pill status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status" style="color:${health.color}; background:${health.soft}"><span class="pill-dot" style="background:${health.color}"></span>${health.label}</span>
         <button type="button" class="summary-open-count" title="Open ${p.name}'s action items">${openCount} open action points</button>
@@ -1870,6 +1917,7 @@ function buildPersonRow(item, forPerson){
       <div class="item-meta">
         <div class="item-date ${overdue ? "overdue" : ""}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
         <div class="item-status" style="color:${pillColor}; background:${pillSoft}" data-toggle-status="${item._id}" title="Click to change status">${label}</div>
+        ${item.code ? `<div class="item-code mono">${item.code}</div>` : ""}
       </div>
       <div class="item-text-wrap">
         <span class="project-tags-row">${tagsHtml}</span>
@@ -2385,6 +2433,7 @@ function buildProjectPanel(p){
           <div class="item-meta">
             <div class="item-date ${overdue ? "overdue" : ""}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
             <div class="item-status" style="color:${pillColor}; background:${pillSoft}" data-toggle-status="${item._id}" title="Click to change status">${label}</div>
+            ${item.code ? `<div class="item-code mono">${item.code}</div>` : ""}
           </div>
           <div class="item-text-wrap">
             <span class="item-text ${statusOpt.isDone ? "done" : ""}">${item.text}</span>
@@ -2526,7 +2575,7 @@ function selectProject(id){
       </div>
       ${latestNote ? `<div class="main-title-updated">Last updated ${formatDate(latestNote.date)}</div>` : ""}
     `;
-    document.getElementById("crumb").textContent = "Projects";
+    document.getElementById("crumb").textContent = (proj.code || "") + " · Projects";
   }
 }
 
@@ -2903,7 +2952,9 @@ function saveItemModal(){
       item.projectIds = projectIds;
     }
   } else {
-    ACTIONS.push({ date, text, status, people, projectIds, _id: ITEM_ID_SEQ++ });
+    const primaryProject = PROJECTS.find(p => p.id === projectIds[0]);
+    const code = nextActionCode(primaryProject ? primaryProject.code : null);
+    ACTIONS.push({ date, text, status, people, projectIds, _id: ITEM_ID_SEQ++, code });
   }
 
   closeItemModal();
@@ -3125,6 +3176,7 @@ function saveNewProjectModal(){
   const project = {
     id: slugify(name),
     name,
+    code: nextProjectCode(name),
     health,
     note: "",
     noteUpdatedAt: todayStr,
