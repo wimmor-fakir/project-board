@@ -228,20 +228,6 @@
   .undo-redo-btn:hover:not(:disabled){ background:var(--surface-sunken); color:var(--ink); }
   .undo-redo-btn:disabled{ opacity:.35; cursor:not-allowed; }
   .undo-redo-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
-  .export-menu-wrap{ position:relative; }
-  .export-menu{
-    position:absolute; top:calc(100% + 4px); right:0; z-index:20;
-    display:flex; flex-direction:column; min-width:170px;
-    background:var(--surface); border:1px solid var(--border); border-radius:8px;
-    box-shadow:var(--shadow); padding:4px; gap:2px;
-  }
-  .export-menu button{
-    font: inherit; font-size:12.5px; text-align:left; color:var(--ink);
-    background:none; border:none; border-radius:6px; padding:7px 9px; cursor:pointer;
-  }
-  .export-menu button:hover{ background:var(--surface-sunken); }
-  .export-menu button:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
-
   .panels{ position:relative; }
   .panel{ display:none; }
   .panel.active{ display:block; }
@@ -830,14 +816,7 @@
       <div class="updated">
         <button type="button" class="undo-redo-btn" id="undoBtn" title="Undo (Ctrl+Z)" disabled="">↶ Undo</button>
         <button type="button" class="undo-redo-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled="">↷ Redo</button>
-        <div class="export-menu-wrap">
-          <button type="button" class="undo-redo-btn" id="exportBtn" title="Export board">⤓ Export</button>
-          <div class="export-menu" id="exportMenu" hidden>
-            <button type="button" data-export="txt">Text file (.txt)</button>
-            <button type="button" data-export="md">Markdown file (.md)</button>
-            <button type="button" data-export="slack">Copy for Slack</button>
-          </div>
-        </div>
+        <button type="button" class="undo-redo-btn" id="exportBtn" title="Copy this project's update for Slack">📋 Copy for Slack</button>
         <span>Board synced <span class="mono" id="syncTime">just now</span><span id="saveStatusSep" hidden=""> · </span><span class="save-status" id="saveStatus"></span><span class="save-status" id="exportStatus"></span></span>
       </div>
     </div>
@@ -1477,61 +1456,31 @@ function setSaveStatus(state){
   if (usingLocalFallback && !dbReady) setSaveStatus("local");
 })();
 
-let downloadsCap = null;
-(async function initDownloadsCapability(){
-  try {
-    if (window.claude && typeof window.claude.use === "function") {
-      downloadsCap = await window.claude.use("downloads");
-    }
-  } catch (e) { downloadsCap = null; }
-})();
-
-/* ---------- Export ---------- */
-const EXPORT_STYLES = {
-  txt: {
-    h1: s => s.toUpperCase(),
-    h2: s => "\n" + s + "\n" + "-".repeat(s.length),
-    bold: s => s,
-    bullet: "-",
-    checkbox: done => done ? "[x] " : "[ ] ",
-  },
-  md: {
-    h1: s => "# " + s,
-    h2: s => "\n## " + s,
-    bold: s => "**" + s + "**",
-    bullet: "-",
-    checkbox: done => done ? "[x] " : "[ ] ",
-  },
-  slack: {
-    h1: s => "*" + s + "*",
-    h2: s => "\n*" + s + "*",
-    bold: s => "*" + s + "*",
-    bullet: "•",
-    checkbox: done => done ? "✅ " : "▫️ ",
-  },
+/* ---------- Export (copy one project's update for Slack) ---------- */
+const SLACK_STYLE = {
+  h1: s => "*" + s + "*",
+  bold: s => "*" + s + "*",
+  bullet: "•",
+  checkbox: done => done ? "✅ " : "▫️ ",
 };
-function buildBoardExport(style){
+function buildProjectExport(p, style){
   const lines = [];
-  lines.push(style.h1("Project Board — Export"));
-  lines.push(TODAY.toISOString().slice(0, 10));
-  PROJECTS.forEach(p => {
-    const health = healthOption(p.health);
-    lines.push(style.h2(p.name + " — " + health.label));
-    const note = latestStatusNote(p);
-    if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
-    const items = ACTIONS.filter(a => a.projectIds.includes(p.id));
-    if (items.length){
-      lines.push(style.bold("Action items") + ":");
-      items.forEach(a => {
-        const done = actionStatusOption(a.status).isDone;
-        const statusLabel = actionStatusOption(a.status).label;
-        const who = a.people && a.people.length ? ", " + a.people.join(", ") : "";
-        lines.push(style.bullet + " " + style.checkbox(done) + a.date + " — " + a.text + " (" + statusLabel + who + ")");
-      });
-    } else {
-      lines.push(style.bullet + " No action items.");
-    }
-  });
+  const health = healthOption(p.health);
+  lines.push(style.h1(p.name + " — " + health.label));
+  const note = latestStatusNote(p);
+  if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
+  const items = ACTIONS.filter(a => a.projectIds.includes(p.id));
+  if (items.length){
+    lines.push(style.bold("Action items") + ":");
+    items.forEach(a => {
+      const done = actionStatusOption(a.status).isDone;
+      const statusLabel = actionStatusOption(a.status).label;
+      const who = a.people && a.people.length ? ", " + a.people.join(", ") : "";
+      lines.push(style.bullet + " " + style.checkbox(done) + a.date + " — " + a.text + " (" + statusLabel + who + ")");
+    });
+  } else {
+    lines.push(style.bullet + " No action items.");
+  }
   return lines.join("\n");
 }
 
@@ -1544,44 +1493,25 @@ function setExportStatus(msg){
   if (msg) exportStatusTimer = setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
-async function exportBoard(kind){
-  document.getElementById("exportMenu").hidden = true;
-  if (kind === "slack"){
-    const text = buildBoardExport(EXPORT_STYLES.slack);
-    try {
-      await navigator.clipboard.writeText(text);
-      setExportStatus("Copied — paste into Slack");
-    } catch (e) {
-      setExportStatus("Couldn't copy — try again");
-    }
-    return;
-  }
-  const style = kind === "md" ? EXPORT_STYLES.md : EXPORT_STYLES.txt;
-  const text = buildBoardExport(style);
-  const filename = "project-board." + kind;
-  if (!downloadsCap){
-    setExportStatus("Downloads unavailable here");
-    return;
-  }
+function updateExportButtonState(){
+  const exportBtn = document.getElementById("exportBtn");
+  if (!exportBtn) return;
+  exportBtn.disabled = !PROJECTS.some(p => p.id === currentId);
+}
+
+async function copyProjectForSlack(){
+  const project = PROJECTS.find(p => p.id === currentId);
+  if (!project) return;
+  const text = buildProjectExport(project, SLACK_STYLE);
   try {
-    await downloadsCap.save({ filename, data: text });
-    setExportStatus("Saved " + filename);
+    await navigator.clipboard.writeText(text);
+    setExportStatus("Copied — paste into Slack");
   } catch (e) {
-    setExportStatus(e && e.code === "declined" ? "" : "Couldn't save — try again");
+    setExportStatus("Couldn't copy — try again");
   }
 }
 
-const exportBtn = document.getElementById("exportBtn");
-const exportMenu = document.getElementById("exportMenu");
-exportBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  exportMenu.hidden = !exportMenu.hidden;
-});
-exportMenu.addEventListener("click", (e) => e.stopPropagation());
-document.addEventListener("click", () => { exportMenu.hidden = true; });
-exportMenu.querySelectorAll("[data-export]").forEach(btn => {
-  btn.addEventListener("click", () => exportBoard(btn.dataset.export));
-});
+document.getElementById("exportBtn").addEventListener("click", copyProjectForSlack);
 
 function buildPublishHtml(){
   const pStart = PRISTINE_HTML.indexOf("/*PROJECTS_START*/") + "/*PROJECTS_START*/".length;
@@ -2551,6 +2481,7 @@ function selectProject(id){
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
+  updateExportButtonState();
   panelsEl.querySelectorAll(".panel").forEach(panel => {
     panel.classList.toggle("active", panel.id === "panel-" + id);
   });
