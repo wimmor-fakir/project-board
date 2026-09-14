@@ -1465,7 +1465,8 @@ const SLACK_STYLE = {
 function formatActionLine(item, lead, style){
   const statusLabel = actionStatusOption(item.status).label;
   const codePrefix = item.code ? item.code + " — " : "";
-  return style.bullet + " " + codePrefix + lead + " — " + item.text + " (" + statusLabel + ") — Due " + item.date;
+  const leadPart = lead ? lead + " — " : "";
+  return style.bullet + " " + codePrefix + leadPart + item.text + " (" + statusLabel + ") — Due " + item.date;
 }
 function buildProjectExport(p, style){
   const lines = [];
@@ -1488,16 +1489,28 @@ function buildProjectExport(p, style){
 function buildPersonExport(person, style){
   const lines = [];
   lines.push(style.h1(person.name));
-  if (person.items.length){
-    person.items.forEach(item => {
-      const projectNames = (item.projectTags && item.projectTags.length
-        ? item.projectTags.map(t => t.name).join(", ")
-        : "No project");
-      lines.push(formatActionLine(item, projectNames, style));
-    });
-  } else {
+  if (!person.items.length){
     lines.push(style.bullet + " No action items.");
+    return lines.join("\n");
   }
+  const groups = new Map();
+  person.items.forEach(item => {
+    const tags = item.projectTags && item.projectTags.length ? item.projectTags : [{ id: null, name: "No project", rank: -1 }];
+    tags.forEach(t => {
+      if (!groups.has(t.id)) groups.set(t.id, { id: t.id, name: t.name, rank: t.rank, items: [] });
+      groups.get(t.id).items.push(item);
+    });
+  });
+  Array.from(groups.values())
+    .sort((a, b) => a.rank - b.rank)
+    .forEach(group => {
+      lines.push("");
+      lines.push(style.bold(group.name));
+      const project = group.id ? PROJECTS.find(p => p.id === group.id) : null;
+      const note = project ? latestStatusNote(project) : null;
+      if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
+      group.items.forEach(item => lines.push(formatActionLine(item, "", style)));
+    });
   return lines.join("\n");
 }
 function buildExpandedPeopleExport(style){
