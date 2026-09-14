@@ -1473,7 +1473,7 @@ function buildProjectExport(p, style){
   const health = healthOption(p.health);
   lines.push(style.h1(p.name + " — " + health.label));
   const note = latestStatusNote(p);
-  if (note) lines.push(style.bold("Latest update (" + note.date + "):") + " " + note.text);
+  if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
   const items = ACTIONS.filter(a => a.projectIds.includes(p.id));
   if (items.length){
     lines.push(style.bold("Action items") + ":");
@@ -1505,11 +1505,10 @@ function buildPersonExport(person, style){
     .sort((a, b) => a.rank - b.rank)
     .forEach(group => {
       lines.push("");
+      lines.push(style.bold(group.name));
       const project = group.id ? PROJECTS.find(p => p.id === group.id) : null;
-      const statusLabel = project ? " — " + healthOption(project.health).label : "";
-      lines.push(style.bold(group.name + statusLabel));
       const note = project ? latestStatusNote(project) : null;
-      if (note) lines.push(style.bold("Latest update (" + note.date + "):") + " " + note.text);
+      if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
       group.items.forEach(item => lines.push(formatActionLine(item, "", style)));
     });
   return lines.join("\n");
