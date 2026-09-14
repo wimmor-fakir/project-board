@@ -1463,6 +1463,11 @@ const SLACK_STYLE = {
   bullet: "•",
   checkbox: done => done ? "✅ " : "▫️ ",
 };
+function formatActionLine(item, lead, style){
+  const done = actionStatusOption(item.status).isDone;
+  const statusLabel = actionStatusOption(item.status).label;
+  return style.bullet + " " + style.checkbox(done) + lead + " — " + item.text + " (" + statusLabel + ") — Due " + item.date;
+}
 function buildProjectExport(p, style){
   const lines = [];
   const health = healthOption(p.health);
@@ -1473,15 +1478,31 @@ function buildProjectExport(p, style){
   if (items.length){
     lines.push(style.bold("Action items") + ":");
     items.forEach(a => {
-      const done = actionStatusOption(a.status).isDone;
-      const statusLabel = actionStatusOption(a.status).label;
-      const who = a.people && a.people.length ? ", " + a.people.join(", ") : "";
-      lines.push(style.bullet + " " + style.checkbox(done) + a.date + " — " + a.text + " (" + statusLabel + who + ")");
+      const who = a.people && a.people.length ? a.people.join(", ") : "Unassigned";
+      lines.push(formatActionLine(a, who, style));
     });
   } else {
     lines.push(style.bullet + " No action items.");
   }
   return lines.join("\n");
+}
+function buildPersonExport(person, style){
+  const lines = [];
+  lines.push(style.h1(person.name));
+  if (person.items.length){
+    person.items.forEach(item => {
+      const projectNames = (item.projectTags && item.projectTags.length ? item.projectTags.map(t => t.name).join(", ") : "No project");
+      lines.push(formatActionLine(item, projectNames, style));
+    });
+  } else {
+    lines.push(style.bullet + " No action items.");
+  }
+  return lines.join("\n");
+}
+function buildExpandedPeopleExport(style){
+  const expanded = lastPeopleList.filter(p => !collapsedPeople.has(p.name));
+  if (!expanded.length) return null;
+  return expanded.map(p => buildPersonExport(p, style)).join("\n\n");
 }
 
 let exportStatusTimer = null;
@@ -1496,13 +1517,24 @@ function setExportStatus(msg){
 function updateExportButtonState(){
   const exportBtn = document.getElementById("exportBtn");
   if (!exportBtn) return;
-  exportBtn.disabled = !PROJECTS.some(p => p.id === currentId);
+  const onProject = PROJECTS.some(p => p.id === currentId);
+  const onPeople = currentId === "people";
+  exportBtn.disabled = !(onProject || onPeople);
+  exportBtn.title = onPeople
+    ? "Copy expanded people's action items for Slack"
+    : "Copy this project's update for Slack";
 }
 
-async function copyProjectForSlack(){
-  const project = PROJECTS.find(p => p.id === currentId);
-  if (!project) return;
-  const text = buildProjectExport(project, SLACK_STYLE);
+async function copyForSlack(){
+  let text;
+  if (currentId === "people"){
+    text = buildExpandedPeopleExport(SLACK_STYLE);
+    if (!text){ setExportStatus("Expand at least one person to copy"); return; }
+  } else {
+    const project = PROJECTS.find(p => p.id === currentId);
+    if (!project) return;
+    text = buildProjectExport(project, SLACK_STYLE);
+  }
   try {
     await navigator.clipboard.writeText(text);
     setExportStatus("Copied — paste into Slack");
@@ -1511,7 +1543,7 @@ async function copyProjectForSlack(){
   }
 }
 
-document.getElementById("exportBtn").addEventListener("click", copyProjectForSlack);
+document.getElementById("exportBtn").addEventListener("click", copyForSlack);
 
 function buildPublishHtml(){
   const pStart = PRISTINE_HTML.indexOf("/*PROJECTS_START*/") + "/*PROJECTS_START*/".length;
@@ -1869,6 +1901,7 @@ function personSortKey(name){
 
 const COLLAPSED_PEOPLE_KEY = "project-board-collapsed-people-v1";
 const collapsedPeople = new Set();
+let lastPeopleList = [];
 function loadCollapsedPeople(){
   try {
     const raw = localStorage.getItem(COLLAPSED_PEOPLE_KEY);
@@ -1974,6 +2007,7 @@ function renderByPerson(){
     const companyOk = companyFilter.size === 0 || companyFilter.has(person.company || "No company");
     return personOk && companyOk;
   });
+  lastPeopleList = visiblePeople;
 
   const personChips = PEOPLE_ORDER.map(name => `
     <button type="button" class="filter-btn ${personFilter.has(name) ? "active" : ""}" data-person-filter data-value="${name}">${name}</button>
