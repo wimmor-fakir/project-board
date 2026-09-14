@@ -1461,21 +1461,16 @@ const SLACK_STYLE = {
   h1: s => "*" + s + "*",
   bold: s => "*" + s + "*",
   bullet: "•",
-  checkbox: done => done ? "✅ " : "▫️ ",
 };
 function formatActionLine(item, lead, style){
-  const done = actionStatusOption(item.status).isDone;
   const statusLabel = actionStatusOption(item.status).label;
   const codePrefix = item.code ? item.code + " — " : "";
-  return style.bullet + " " + style.checkbox(done) + codePrefix + lead + " — " + item.text + " (" + statusLabel + ") — Due " + item.date;
-}
-function projectHeading(p){
-  return p.name + (p.code ? " (" + p.code + ")" : "");
+  return style.bullet + " " + codePrefix + lead + " — " + item.text + " (" + statusLabel + ") — Due " + item.date;
 }
 function buildProjectExport(p, style){
   const lines = [];
   const health = healthOption(p.health);
-  lines.push(style.h1(projectHeading(p) + " — " + health.label));
+  lines.push(style.h1(p.name + " — " + health.label));
   const note = latestStatusNote(p);
   if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
   const items = ACTIONS.filter(a => a.projectIds.includes(p.id));
@@ -1496,7 +1491,7 @@ function buildPersonExport(person, style){
   if (person.items.length){
     person.items.forEach(item => {
       const projectNames = (item.projectTags && item.projectTags.length
-        ? item.projectTags.map(t => t.name + (t.code ? " (" + t.code + ")" : "")).join(", ")
+        ? item.projectTags.map(t => t.name).join(", ")
         : "No project");
       lines.push(formatActionLine(item, projectNames, style));
     });
@@ -1977,7 +1972,7 @@ function renderByPerson(){
     const projectTags = item.projectIds
       .map(pid => PROJECTS.find(p => p.id === pid))
       .filter(Boolean)
-      .map(p => ({ id: p.id, name: p.name, health: p.health, code: p.code, rank: PROJECTS.indexOf(p) }));
+      .map(p => ({ id: p.id, name: p.name, health: p.health, rank: PROJECTS.indexOf(p) }));
     if (projectTags.length === 0) return;
     const projectRank = Math.min(...projectTags.map(t => t.rank));
     item.people.forEach(name => {
