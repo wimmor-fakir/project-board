@@ -1458,8 +1458,8 @@ function setSaveStatus(state){
 
 /* ---------- Export (copy one project's update for Slack) ---------- */
 const SLACK_STYLE = {
-  h1: s => "*" + s + "*",
-  bold: s => "*" + s + "*",
+  h1: s => s,
+  bold: s => s,
   bullet: "•",
 };
 function formatActionLine(item, lead, style){
