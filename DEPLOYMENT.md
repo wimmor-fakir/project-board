@@ -1,6 +1,6 @@
 # Deploying Project Board to the web (GitHub + Supabase)
 
-A beginner-friendly walkthrough for taking `project-board.html` off your
+A beginner-friendly walkthrough for taking `index.html` off your
 C: drive and hosting it as a real website, with Supabase as the database.
 
 ## Read this first — an important gap
@@ -14,7 +14,7 @@ saved anywhere. It'll disappear the moment you refresh the page.
 To fix that, the app's code needs to be changed so that, instead of
 talking to Claude's database, it talks to your Supabase database directly
 (Supabase gives you a small JavaScript library and a web address for this).
-That's a real code change to `project-board.html`, not just a hosting
+That's a real code change to `index.html`, not just a hosting
 setting — and it isn't covered in this guide, since you asked for the
 hosting instructions on their own.
 
@@ -79,7 +79,7 @@ internet that also remembers every past version.
    The first time you push, a window may pop up asking you to log in to
    GitHub — sign in there and it'll remember you next time.
 
-8. Refresh the GitHub page — you should now see `project-board.html` and
+8. Refresh the GitHub page — you should now see `index.html` and
    your other files listed there.
 
 From now on, whenever you (or Claude, on your behalf) make changes and
@@ -106,16 +106,9 @@ git push
    https://YOUR-USERNAME.github.io/project-board/
    ```
 
-6. Your `project-board.html` file will be reachable at:
-
-   ```
-   https://YOUR-USERNAME.github.io/project-board/project-board.html
-   ```
-
-   (Optional nice-to-have: rename `project-board.html` to `index.html`
-   — either in File Explorer or by asking Claude to do it — so the site
-   loads at the shorter address without the filename on the end. If you
-   do this, remember to `git add`, commit, and `git push` the rename.)
+6. Since the app's file is named `index.html`, that address is all you
+   need — GitHub Pages serves it automatically at the root URL, no
+   filename on the end required.
 
 That's it — the page is now genuinely on the world wide web, and anyone
 with the link can open it. Remember the caveat from the top of this guide:
@@ -165,7 +158,7 @@ of this section explains how that works and what to do about it now.
 
 1. **Can someone load the web page at all?**
    GitHub Pages sites are public by default — anyone with the link can
-   open `project-board.html`, the same way anyone can open any other
+   open `index.html`, the same way anyone can open any other
    public website. There's no username/password on the page itself
    unless the app is built to have one. (Making the *page* itself private
    at the hosting level needs a paid GitHub plan; for a small team, it's
@@ -221,7 +214,7 @@ future code step:
 **This part comes with the future code-wiring step**, since it needs
 actual application code, not just Supabase settings:
 
-- A login screen in `project-board.html` (email + password, using
+- A login screen in `index.html` (email + password, using
   Supabase's own sign-in function).
 - A Row Level Security policy on your data table along the lines of
   "allow all actions for any signed-in user" — one short rule, written
@@ -248,7 +241,7 @@ only if a specific need for something more restrictive comes up.
 | Thing | Where |
 |---|---|
 | Your code, versioned | `github.com/YOUR-USERNAME/project-board` |
-| Your live website | `YOUR-USERNAME.github.io/project-board/project-board.html` |
+| Your live website | `YOUR-USERNAME.github.io/project-board/` |
 | Your database (empty, unconnected) | Your Supabase project dashboard |
 | Teammate accounts (if you added them in Part 4) | Supabase → Authentication → Users |
 
