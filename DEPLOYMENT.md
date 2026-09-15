@@ -6,21 +6,25 @@ C: drive and hosting it as a real website, with Supabase as the database.
 ## Status: the code is wired up
 
 `index.html` now talks to Supabase directly (instead of Claude's Artifact
-database) and requires sign-in before showing the board, matching the
-access decision in Part 4. **Two things still need doing before it
-actually works when you open the live site** — both are one-time, no-code
-steps:
+database), requires sign-in before showing the board (matching the access
+decision in Part 4), and logs who changes each action item to an
+Activity tab. **Three things still need doing before it actually works
+when you open the live site** — all one-time, no-code steps:
 
-1. **Run the setup SQL** — see `supabase-setup.sql` in this same folder.
-   Open it, copy its contents, paste into Supabase → **SQL Editor** → New
-   query, and click **Run**. This creates the table the app saves to and
-   the security rule that requires sign-in.
-2. **Create at least one user account for yourself** — see Part 4 below
-   ("You can do this part now, directly in Supabase"). Without an
-   account, the sign-in screen has no one to let in.
+1. **Run `supabase-setup.sql`** — open it, copy its contents, paste into
+   Supabase → **SQL Editor** → New query, and click **Run**. This creates
+   the table the app saves to and the security rule that requires
+   sign-in.
+2. **Run `supabase-activity-log.sql`** the same way — a second, separate
+   script that creates the table behind the Activity tab (who changed
+   what, and when).
+3. **Create at least one user account for yourself** — see Part 4 below
+   ("What's left is entirely on the Supabase side"). Without an account,
+   the sign-in screen has no one to let in.
 
-Once both are done, push the code (see Part 1) and the live site will
-save and sync for real, for anyone you've created an account for.
+Once all three are done, push the code (see Part 1) and the live site
+will save, sync, and log activity for real, for anyone you've created an
+account for.
 
 ---
 
@@ -230,6 +234,7 @@ only if a specific need for something more restrictive comes up.
 | Still to do | Why |
 |---|---|
 | Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
+| Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 
 ## Making future changes
