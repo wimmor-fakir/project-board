@@ -206,14 +206,24 @@ read or write the board's data.
    top of this guide).
 2. In your Supabase project, go to **Authentication** (left sidebar).
 3. Under **Providers**, confirm **Email** is enabled (it is by default).
-4. Go to **Authentication → Users** and click **Add user** → **Create new
+4. **Point invite links at your real site, not `localhost:3000`.** New
+   Supabase projects default to a placeholder redirect address that
+   doesn't exist anywhere. Go to **Authentication → URL Configuration**,
+   set **Site URL** to your live site's address (e.g.
+   `https://YOUR-USERNAME.github.io/project-board/`), and add that same
+   address under **Redirect URLs** too. Skip this and any invite email
+   will land people on a "can't connect" page instead of the board.
+5. Go to **Authentication → Users** and click **Add user** → **Create new
    user** for yourself and each teammate who should have access. Use
    "Auto Confirm User" so they don't need to click an email link the
-   first time (you can also invite by email instead, which sends them a
-   sign-up link — either works).
-5. Set a temporary password for each person, and share it with them
+   first time (you can also invite by email instead — or, once Part 5's
+   Edge Function is deployed, invite people from inside the app's
+   Settings page).
+6. Set a temporary password for each person, and share it with them
    privately (not over email in plain text) — Supabase's dashboard lets
    you reset anyone's password later if they need to change it.
+   (People invited by email instead get no password at all until they
+   click **Change password** inside the app after their first sign-in.)
 
 ### If you want to change this later
 
@@ -255,6 +265,11 @@ still letting the app call it safely over the internet.
 6. Test it: sign in to your live site as `wim@hawktivity.com`, open
    **Settings**, and you should see "User management" at the bottom with
    a list of current users instead of an error.
+
+Before inviting anyone from this section, make sure Part 4 step 4 (Site
+URL / Redirect URLs pointing at your real site, not `localhost:3000`) is
+done — otherwise invite links will send people to a page that doesn't
+exist.
 
 If your Supabase project doesn't show a code editor for this (some
 older or restricted plans don't), the alternative is installing the
