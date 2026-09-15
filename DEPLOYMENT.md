@@ -154,12 +154,12 @@ and hand over the Project URL and anon key from this step.
 
 ---
 
-## Part 4 — Deciding who can access the site and its data
+## Part 4 — Managing who can access the site and its data
 
-This part is about a decision, not a task with a fixed end point — but
-there's a clear recommended answer for a small team tool like this one,
-and you can start setting the groundwork for it in Supabase today, even
-before the code is wired up.
+**Decision made: sign-in required, no public sign-up.** Anyone opening
+the site will need an account you've created for them ahead of time —
+there's no self-service signup, and nobody gets in without one. The rest
+of this section explains how that works and what to do about it now.
 
 ### There are two separate doors, not one
 
@@ -187,11 +187,11 @@ before the code is wired up.
    from your RLS rules and from requiring people to sign in — never from
    hiding that key.
 
-### The recommended setup for this project
+### How this setup works
 
 Since this board is shared team information (not something where each
-person should only see their own slice), the simplest model that's still
-genuinely secure is:
+person should only see their own slice), it pairs with the simplest model
+that's still genuinely secure:
 
 - **Sign-in required, no public sign-up.** Anyone opening the site sees a
   login screen. You (Wim) add each teammate's email address in Supabase
@@ -232,15 +232,14 @@ you want sign-in included — it's a natural part of that same step rather
 than a separate one, and the users you create above will be ready and
 waiting for it.
 
-### If you decide differently later
+### If you want to change this later
 
 Other models are possible — e.g., read-only access for some people, or
 each person only editing their own items — but they add real complexity
 (more rules, more testing, more edge cases) for a tool where the whole
-point is everyone seeing the same shared board. The recommendation above
-is the simplest option that's still properly access-controlled; treat it
-as the default unless you have a specific reason to want something more
-restrictive.
+point is everyone seeing the same shared board. The chosen model above is
+the simplest option that's still properly access-controlled; revisit it
+only if a specific need for something more restrictive comes up.
 
 ---
 
@@ -257,7 +256,7 @@ restrictive.
 |---|---|
 | Rewrite the app's save/load code to call Supabase instead of Claude's database | Otherwise nothing typed on the hosted site is saved anywhere |
 | Create a table in Supabase for the board's data | The database has no structure yet |
-| Add a sign-in screen to the app, and a Row Level Security rule allowing signed-in users | Without this, either nobody can read/write the data (locked by default) or — if a rule is added carelessly — anyone on the internet can. See Part 4 for the recommended approach |
+| Add a sign-in screen to the app, and a Row Level Security rule allowing signed-in users | Without this, either nobody can read/write the data (locked by default) or — if a rule is added carelessly — anyone on the internet can. See Part 4 for the chosen approach |
 
 ## Making future changes
 
