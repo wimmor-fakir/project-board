@@ -640,6 +640,10 @@
     background:none; width:9px; height:9px; border-radius:50%;
     border:2px solid var(--ink-3);
   }
+  .tab-dot.activity-dot{
+    background:none; width:9px; height:9px;
+    border-left:2px solid var(--ink-3); border-bottom:2px solid var(--ink-3);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -659,6 +663,17 @@
   .settings-status-swatch{ width:14px; height:14px; border-radius:50%; flex:none; }
   .settings-status-label{ font-size:13.5px; font-weight:600; flex:1; min-width:0; }
   .settings-status-usage{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+
+  /* ---------- Activity panel ---------- */
+  .activity-list{ display:flex; flex-direction:column; gap:8px; }
+  .activity-row{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:10px 12px; box-shadow:var(--shadow);
+  }
+  .activity-meta{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:4px; }
+  .activity-who{ font-weight:600; font-size:12.5px; }
+  .activity-when{ font-size:11px; color:var(--ink-3); white-space:nowrap; }
+  .activity-summary{ font-size:12.5px; color:var(--ink-2); }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -1671,6 +1686,42 @@ async function publishState(){
   setSaveStatus("local");
 }
 
+/* ---------- Action item change log ---------- */
+function describeItemChanges(before, after){
+  const changes = [];
+  if (before.text !== after.text) changes.push("description changed");
+  if (before.date !== after.date) changes.push("due date: " + before.date + " → " + after.date);
+  if (before.status !== after.status) {
+    changes.push("status: " + actionStatusOption(before.status).label + " → " + actionStatusOption(after.status).label);
+  }
+  const beforePeople = before.people || [];
+  const afterPeople = after.people || [];
+  const addedPeople = afterPeople.filter(n => !beforePeople.includes(n));
+  const removedPeople = beforePeople.filter(n => !afterPeople.includes(n));
+  if (addedPeople.length) changes.push("added " + addedPeople.join(", "));
+  if (removedPeople.length) changes.push("removed " + removedPeople.join(", "));
+  const beforeProjects = before.projectIds || [];
+  const afterProjects = after.projectIds || [];
+  const addedProjects = afterProjects.filter(id => !beforeProjects.includes(id)).map(id => (PROJECTS.find(p => p.id === id) || {}).name).filter(Boolean);
+  const removedProjects = beforeProjects.filter(id => !afterProjects.includes(id)).map(id => (PROJECTS.find(p => p.id === id) || {}).name).filter(Boolean);
+  if (addedProjects.length) changes.push("added to " + addedProjects.join(", "));
+  if (removedProjects.length) changes.push("removed from " + removedProjects.join(", "));
+  return changes;
+}
+
+async function logActionChange(actionId, actionCode, changeType, summary){
+  if (!supabaseClient || !authSession) return;
+  try {
+    await supabaseClient.from("action_change_log").insert({
+      action_id: actionId,
+      action_code: actionCode || null,
+      change_type: changeType,
+      summary,
+      changed_by: authSession.user.email,
+    });
+  } catch (e) { /* best-effort — never block a save on logging failure */ }
+}
+
 let currentId = "summary";
 
 function buildTab(p){
@@ -1744,6 +1795,22 @@ function renderRail(){
   `;
   settingsTab.addEventListener("click", () => selectProject("settings"));
   rail.appendChild(settingsTab);
+
+  const activityTab = document.createElement("button");
+  activityTab.className = "tab";
+  activityTab.role = "tab";
+  activityTab.id = "tab-activity";
+  activityTab.dataset.id = "activity";
+  activityTab.setAttribute("aria-controls", "panel-activity");
+  activityTab.innerHTML = `
+    <span class="tab-dot activity-dot"></span>
+    <span class="tab-body">
+      <div class="tab-name">Activity</div>
+      <div class="tab-meta">Who changed what</div>
+    </span>
+  `;
+  activityTab.addEventListener("click", () => selectProject("activity"));
+  rail.appendChild(activityTab);
 
   const divider = document.createElement("div");
   divider.className = "rail-divider";
@@ -2161,6 +2228,13 @@ settingsPanel.role = "tabpanel";
 settingsPanel.setAttribute("aria-labelledby", "tab-settings");
 panelsEl.appendChild(settingsPanel);
 
+const activityPanel = document.createElement("section");
+activityPanel.className = "panel";
+activityPanel.id = "panel-activity";
+activityPanel.role = "tabpanel";
+activityPanel.setAttribute("aria-labelledby", "tab-activity");
+panelsEl.appendChild(activityPanel);
+
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
 let settingsRenamingAction = null;
@@ -2192,6 +2266,54 @@ function buildSettingsStatusRow(opt, kind, usage, noun, otherOptions){
         <button type="button" class="btn btn-text" data-delete-${kind}="${opt.value}" ${canDelete ? "" : "disabled title='At least one status must remain'"}>Delete</button>
       </div>
     </div>`;
+}
+
+function formatChangeTimestamp(iso){
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+function buildActivityRow(entry){
+  const row = document.createElement("div");
+  row.className = "activity-row";
+  const codeBit = entry.action_code ? `<span class="mono">${entry.action_code}</span> · ` : "";
+  row.innerHTML = `
+    <div class="activity-meta">
+      <span class="activity-who">${entry.changed_by}</span>
+      <span class="activity-when">${formatChangeTimestamp(entry.created_at)}</span>
+    </div>
+    <div class="activity-summary">${codeBit}${entry.summary}</div>
+  `;
+  return row;
+}
+async function renderActivity(){
+  if (!supabaseClient || !authSession){
+    activityPanel.innerHTML = `<p class="summary-facts">Sign in to see activity history.</p>`;
+    return;
+  }
+  activityPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const { data, error } = await supabaseClient
+    .from("action_change_log")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (currentId !== "activity") return; // user navigated away while this was loading
+  if (error){
+    activityPanel.innerHTML = `<p class="summary-facts">Couldn't load activity — has supabase-activity-log.sql been run yet?</p>`;
+    return;
+  }
+  if (!data.length){
+    activityPanel.innerHTML = `<p class="summary-facts">No activity recorded yet.</p>`;
+    return;
+  }
+  activityPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Who changed which action item, most recent first.</p>
+    </div>
+  `;
+  const list = document.createElement("div");
+  list.className = "activity-list";
+  data.forEach(entry => list.appendChild(buildActivityRow(entry)));
+  activityPanel.appendChild(list);
 }
 
 function renderSettings(){
@@ -2541,7 +2663,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -2593,6 +2715,10 @@ function selectProject(id){
   } else if (id === "settings"){
     mainTitleEl.textContent = "Settings";
     document.getElementById("crumb").textContent = "Overview";
+  } else if (id === "activity"){
+    mainTitleEl.textContent = "Activity";
+    document.getElementById("crumb").textContent = "Overview";
+    renderActivity();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
@@ -2730,7 +2856,9 @@ function openInlineStatusEditor(statusEl, itemId){
     document.removeEventListener("click", onDocClick, true);
     document.removeEventListener("keydown", onKeydown, true);
     if (newValue && newValue !== item.status){
+      const oldValue = item.status;
       item.status = newValue;
+      logActionChange(item._id, item.code, "updated", "status: " + actionStatusOption(oldValue).label + " → " + actionStatusOption(newValue).label);
       refreshAll();
     } else {
       rerenderCurrentView();
@@ -2776,7 +2904,9 @@ function openInlineDateEditor(dateEl, itemId){
     if (settled) return;
     settled = true;
     if (input.value && input.value !== item.date){
+      const oldValue = item.date;
       item.date = input.value;
+      logActionChange(item._id, item.code, "updated", "due date: " + oldValue + " → " + input.value);
       refreshAll();
     } else {
       rerenderCurrentView();
@@ -2974,16 +3104,21 @@ function saveItemModal(){
   if (editingItemId){
     const item = findItemById(editingItemId);
     if (item){
+      const before = { text: item.text, date: item.date, status: item.status, people: item.people, projectIds: item.projectIds };
       item.date = date;
       item.text = text;
       item.status = status;
       item.people = people;
       item.projectIds = projectIds;
+      const changes = describeItemChanges(before, item);
+      if (changes.length) logActionChange(item._id, item.code, "updated", changes.join("; "));
     }
   } else {
     const primaryProject = PROJECTS.find(p => p.id === projectIds[0]);
     const code = nextActionCode(primaryProject ? primaryProject.code : null);
-    ACTIONS.push({ date, text, status, people, projectIds, _id: ITEM_ID_SEQ++, code });
+    const newItem = { date, text, status, people, projectIds, _id: ITEM_ID_SEQ++, code };
+    ACTIONS.push(newItem);
+    logActionChange(newItem._id, newItem.code, "created", "Created: " + text);
   }
 
   closeItemModal();
@@ -2993,7 +3128,10 @@ function saveItemModal(){
 function deleteItemModal(){
   if (!editingItemId) return;
   const idx = ACTIONS.findIndex(a => a._id === editingItemId);
-  if (idx !== -1) ACTIONS.splice(idx, 1);
+  if (idx !== -1) {
+    const [removed] = ACTIONS.splice(idx, 1);
+    logActionChange(removed._id, removed.code, "deleted", "Deleted: " + removed.text);
+  }
   closeItemModal();
   refreshAll();
 }
@@ -3697,7 +3835,7 @@ renderSettings();
 let initialTab = "summary";
 try {
   const storedTab = localStorage.getItem(TAB_STORAGE_KEY);
-  if (storedTab && (storedTab === "summary" || storedTab === "people" || storedTab === "settings" || PROJECTS.some(p => p.id === storedTab))){
+  if (storedTab && (storedTab === "summary" || storedTab === "people" || storedTab === "settings" || storedTab === "activity" || PROJECTS.some(p => p.id === storedTab))){
     initialTab = storedTab;
   }
 } catch (err) {}
