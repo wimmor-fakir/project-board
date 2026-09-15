@@ -154,6 +154,96 @@ and hand over the Project URL and anon key from this step.
 
 ---
 
+## Part 4 — Deciding who can access the site and its data
+
+This part is about a decision, not a task with a fixed end point — but
+there's a clear recommended answer for a small team tool like this one,
+and you can start setting the groundwork for it in Supabase today, even
+before the code is wired up.
+
+### There are two separate doors, not one
+
+1. **Can someone load the web page at all?**
+   GitHub Pages sites are public by default — anyone with the link can
+   open `project-board.html`, the same way anyone can open any other
+   public website. There's no username/password on the page itself
+   unless the app is built to have one. (Making the *page* itself private
+   at the hosting level needs a paid GitHub plan; for a small team, it's
+   both cheaper and more useful to add a proper sign-in screen inside the
+   app instead — see below.)
+
+2. **Can someone read or change the data?**
+   This is controlled entirely by Supabase, through a feature called
+   **Row Level Security (RLS)**. Every Supabase table starts with RLS
+   fully locked — by default, nobody can read or write anything, not
+   even your own app, until you write a rule that says otherwise. This
+   is good: it means a forgotten step fails safe (no access) rather than
+   failing open (public access).
+
+   A subtlety worth understanding: the "anon" API key your app uses
+   (from Part 3) is not a secret — it's embedded in the page's own code,
+   so literally anyone who views the page's source can see it. It
+   identifies your *project*, not a *person*. The actual protection comes
+   from your RLS rules and from requiring people to sign in — never from
+   hiding that key.
+
+### The recommended setup for this project
+
+Since this board is shared team information (not something where each
+person should only see their own slice), the simplest model that's still
+genuinely secure is:
+
+- **Sign-in required, no public sign-up.** Anyone opening the site sees a
+  login screen. You (Wim) add each teammate's email address in Supabase
+  ahead of time; nobody can create their own account.
+- **Once signed in, everyone can see and edit everything** — same as
+  today's Claude Artifact, where anyone with access to it can edit
+  freely. No per-person permission levels, keeping it simple.
+- **Signed out = nothing.** No board data is visible to anyone who
+  hasn't been explicitly added.
+
+This needs two things, one you can do now and one that comes with the
+future code step:
+
+**You can do this part now, directly in Supabase — no code needed:**
+
+1. In your Supabase project, go to **Authentication** (left sidebar).
+2. Under **Providers**, confirm **Email** is enabled (it is by default).
+3. Go to **Authentication → Users** and click **Add user** → **Create new
+   user** for yourself and each teammate who should have access. Use
+   "Auto Confirm User" so they don't need to click an email link the
+   first time (you can also invite by email instead, which sends them a
+   sign-up link — either works).
+4. Set a temporary password for each person, and share it with them
+   privately (not over email in plain text) — tell them to change it on
+   first login once the app supports that, or reset it via Supabase later.
+
+**This part comes with the future code-wiring step**, since it needs
+actual application code, not just Supabase settings:
+
+- A login screen in `project-board.html` (email + password, using
+  Supabase's own sign-in function).
+- A Row Level Security policy on your data table along the lines of
+  "allow all actions for any signed-in user" — one short rule, written
+  once when the table is created.
+
+When you come back to have the app wired up to Supabase, mention that
+you want sign-in included — it's a natural part of that same step rather
+than a separate one, and the users you create above will be ready and
+waiting for it.
+
+### If you decide differently later
+
+Other models are possible — e.g., read-only access for some people, or
+each person only editing their own items — but they add real complexity
+(more rules, more testing, more edge cases) for a tool where the whole
+point is everyone seeing the same shared board. The recommendation above
+is the simplest option that's still properly access-controlled; treat it
+as the default unless you have a specific reason to want something more
+restrictive.
+
+---
+
 ## Quick reference — what you have after this guide
 
 | Thing | Where |
@@ -161,12 +251,13 @@ and hand over the Project URL and anon key from this step.
 | Your code, versioned | `github.com/YOUR-USERNAME/project-board` |
 | Your live website | `YOUR-USERNAME.github.io/project-board/project-board.html` |
 | Your database (empty, unconnected) | Your Supabase project dashboard |
+| Teammate accounts (if you added them in Part 4) | Supabase → Authentication → Users |
 
 | Still to do | Why |
 |---|---|
 | Rewrite the app's save/load code to call Supabase instead of Claude's database | Otherwise nothing typed on the hosted site is saved anywhere |
 | Create a table in Supabase for the board's data | The database has no structure yet |
-| Decide who can read/write the data (Supabase's "Row Level Security") | By default a fresh Supabase table can be locked down completely — worth deciding on purpose, since this site would otherwise be open to the public internet |
+| Add a sign-in screen to the app, and a Row Level Security rule allowing signed-in users | Without this, either nobody can read/write the data (locked by default) or — if a rule is added carelessly — anyone on the internet can. See Part 4 for the recommended approach |
 
 ## Making future changes
 
