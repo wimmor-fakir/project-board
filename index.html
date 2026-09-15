@@ -831,9 +831,8 @@
       <div class="updated">
         <button type="button" class="undo-redo-btn" id="undoBtn" title="Undo (Ctrl+Z)" disabled="">↶ Undo</button>
         <button type="button" class="undo-redo-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled="">↷ Redo</button>
-        <button type="button" class="undo-redo-btn" id="exportBtn" title="Copy this project's update for Slack">📋 Copy for Slack</button>
         <button type="button" class="undo-redo-btn" id="signOutBtn" title="Sign out" hidden="">⎋ Sign out</button>
-        <span>Board synced <span class="mono" id="syncTime">just now</span><span id="saveStatusSep" hidden=""> · </span><span class="save-status" id="saveStatus"></span><span class="save-status" id="exportStatus"></span></span>
+        <span>Board synced <span class="mono" id="syncTime">just now</span><span id="saveStatusSep" hidden=""> · </span><span class="save-status" id="saveStatus"></span></span>
       </div>
     </div>
 
@@ -1560,109 +1559,6 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
   }
 })();
 
-/* ---------- Export (copy one project's update for Slack) ---------- */
-const SLACK_STYLE = {
-  h1: s => s,
-  bold: s => s,
-  bullet: "•",
-};
-function formatActionLine(item, lead, style){
-  const statusLabel = actionStatusOption(item.status).label;
-  const codePrefix = item.code ? item.code + " — " : "";
-  const leadPart = lead ? lead + " — " : "";
-  return style.bullet + " " + codePrefix + leadPart + item.text + " (" + statusLabel + ") — Due " + item.date;
-}
-function buildProjectExport(p, style){
-  const lines = [];
-  const health = healthOption(p.health);
-  lines.push(style.h1(p.name + " — " + health.label));
-  const note = latestStatusNote(p);
-  if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
-  const items = ACTIONS.filter(a => a.projectIds.includes(p.id));
-  if (items.length){
-    lines.push(style.bold("Action items") + ":");
-    items.forEach(a => {
-      const who = a.people && a.people.length ? a.people.join(", ") : "Unassigned";
-      lines.push(formatActionLine(a, who, style));
-    });
-  } else {
-    lines.push(style.bullet + " No action items.");
-  }
-  return lines.join("\n");
-}
-function buildPersonExport(person, style){
-  const lines = [];
-  lines.push(style.h1(person.name));
-  if (!person.items.length){
-    lines.push(style.bullet + " No action items.");
-    return lines.join("\n");
-  }
-  const groups = new Map();
-  person.items.forEach(item => {
-    const tags = item.projectTags && item.projectTags.length ? item.projectTags : [{ id: null, name: "No project", rank: -1 }];
-    tags.forEach(t => {
-      if (!groups.has(t.id)) groups.set(t.id, { id: t.id, name: t.name, rank: t.rank, items: [] });
-      groups.get(t.id).items.push(item);
-    });
-  });
-  Array.from(groups.values())
-    .sort((a, b) => a.rank - b.rank)
-    .forEach(group => {
-      lines.push("");
-      lines.push(style.bold(group.name));
-      const project = group.id ? PROJECTS.find(p => p.id === group.id) : null;
-      const note = project ? latestStatusNote(project) : null;
-      if (note) lines.push(style.bold("Latest update") + " (" + note.date + "): " + note.text);
-      group.items.forEach(item => lines.push(formatActionLine(item, "", style)));
-    });
-  return lines.join("\n");
-}
-function buildExpandedPeopleExport(style){
-  const expanded = lastPeopleList.filter(p => !collapsedPeople.has(p.name));
-  if (!expanded.length) return null;
-  return expanded.map(p => buildPersonExport(p, style)).join("\n\n");
-}
-
-let exportStatusTimer = null;
-function setExportStatus(msg){
-  const el = document.getElementById("exportStatus");
-  if (!el) return;
-  el.textContent = msg;
-  if (exportStatusTimer) clearTimeout(exportStatusTimer);
-  if (msg) exportStatusTimer = setTimeout(() => { el.textContent = ""; }, 4000);
-}
-
-function updateExportButtonState(){
-  const exportBtn = document.getElementById("exportBtn");
-  if (!exportBtn) return;
-  const onProject = PROJECTS.some(p => p.id === currentId);
-  const onPeople = currentId === "people";
-  exportBtn.disabled = !(onProject || onPeople);
-  exportBtn.title = onPeople
-    ? "Copy expanded people's action items for Slack"
-    : "Copy this project's update for Slack";
-}
-
-async function copyForSlack(){
-  let text;
-  if (currentId === "people"){
-    text = buildExpandedPeopleExport(SLACK_STYLE);
-    if (!text){ setExportStatus("Expand at least one person to copy"); return; }
-  } else {
-    const project = PROJECTS.find(p => p.id === currentId);
-    if (!project) return;
-    text = buildProjectExport(project, SLACK_STYLE);
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    setExportStatus("Copied — paste into Slack");
-  } catch (e) {
-    setExportStatus("Couldn't copy — try again");
-  }
-}
-
-document.getElementById("exportBtn").addEventListener("click", copyForSlack);
-
 async function publishState(){
   if (applyingRemoteUpdate) return; // this state came from the database — don't echo it back
   if (supabaseClient && authSession) {
@@ -2032,7 +1928,6 @@ function personSortKey(name){
 
 const COLLAPSED_PEOPLE_KEY = "project-board-collapsed-people-v1";
 const collapsedPeople = new Set();
-let lastPeopleList = [];
 function loadCollapsedPeople(){
   try {
     const raw = localStorage.getItem(COLLAPSED_PEOPLE_KEY);
@@ -2138,7 +2033,6 @@ function renderByPerson(){
     const companyOk = companyFilter.size === 0 || companyFilter.has(person.company || "No company");
     return personOk && companyOk;
   });
-  lastPeopleList = visiblePeople;
 
   const personChips = PEOPLE_ORDER.map(name => `
     <button type="button" class="filter-btn ${personFilter.has(name) ? "active" : ""}" data-person-filter data-value="${name}">${name}</button>
@@ -2701,7 +2595,6 @@ function selectProject(id){
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
-  updateExportButtonState();
   panelsEl.querySelectorAll(".panel").forEach(panel => {
     panel.classList.toggle("active", panel.id === "panel-" + id);
   });
