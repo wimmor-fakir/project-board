@@ -831,6 +831,7 @@
       <div class="updated">
         <button type="button" class="undo-redo-btn" id="undoBtn" title="Undo (Ctrl+Z)" disabled="">↶ Undo</button>
         <button type="button" class="undo-redo-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled="">↷ Redo</button>
+        <button type="button" class="undo-redo-btn" id="changePasswordBtn" title="Change password" hidden="">🔑 Change password</button>
         <button type="button" class="undo-redo-btn" id="signOutBtn" title="Sign out" hidden="">⎋ Sign out</button>
         <span>Board synced <span class="mono" id="syncTime">just now</span><span id="saveStatusSep" hidden=""> · </span><span class="save-status" id="saveStatus"></span></span>
       </div>
@@ -862,6 +863,33 @@
       <div></div>
       <div class="modal-foot-right">
         <button class="btn btn-primary" id="authSignInBtn" type="button">Sign in</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="changePasswordBackdrop" hidden="">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+    <div class="modal-head">
+      <h3 id="changePasswordTitle">Change password</h3>
+      <button class="modal-close" id="changePasswordClose" aria-label="Close" type="button">×</button>
+    </div>
+    <div class="modal-body">
+      <label class="field">
+        <span>New password</span>
+        <input id="newPasswordField" type="password" autocomplete="new-password">
+      </label>
+      <label class="field">
+        <span>Confirm new password</span>
+        <input id="confirmPasswordField" type="password" autocomplete="new-password">
+      </label>
+      <div class="modal-error" id="changePasswordError" hidden></div>
+    </div>
+    <div class="modal-foot">
+      <div></div>
+      <div class="modal-foot-right">
+        <button class="btn btn-secondary" id="changePasswordCancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="changePasswordSave" type="button">Save</button>
       </div>
     </div>
   </div>
@@ -1440,11 +1468,13 @@ function setSaveStatus(state){
 function showAuthGate(){
   document.getElementById("authGateBackdrop").hidden = false;
   document.getElementById("signOutBtn").hidden = true;
+  document.getElementById("changePasswordBtn").hidden = true;
 }
 function hideAuthGate(){
   document.getElementById("authGateBackdrop").hidden = true;
   document.getElementById("authError").hidden = true;
   document.getElementById("signOutBtn").hidden = false;
+  document.getElementById("changePasswordBtn").hidden = false;
 }
 
 async function loadBoardFromSupabase(){
@@ -1527,6 +1557,43 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); signIn(); }
 });
 
+function openChangePasswordModal(){
+  document.getElementById("newPasswordField").value = "";
+  document.getElementById("confirmPasswordField").value = "";
+  document.getElementById("changePasswordError").hidden = true;
+  document.getElementById("changePasswordBackdrop").hidden = false;
+  document.getElementById("newPasswordField").focus();
+}
+function closeChangePasswordModal(){
+  document.getElementById("changePasswordBackdrop").hidden = true;
+}
+async function saveNewPassword(){
+  const newPassword = document.getElementById("newPasswordField").value;
+  const confirmPassword = document.getElementById("confirmPasswordField").value;
+  const errorEl = document.getElementById("changePasswordError");
+  errorEl.hidden = true;
+  if (!newPassword || newPassword.length < 6){
+    errorEl.textContent = "Please enter a password of at least 6 characters.";
+    errorEl.hidden = false;
+    return;
+  }
+  if (newPassword !== confirmPassword){
+    errorEl.textContent = "Passwords don't match.";
+    errorEl.hidden = false;
+    return;
+  }
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  if (error){
+    errorEl.textContent = error.message;
+    errorEl.hidden = false;
+    return;
+  }
+  closeChangePasswordModal();
+}
+document.getElementById("confirmPasswordField").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); saveNewPassword(); }
+});
+
 (async function initSupabase(){
   await Promise.resolve(); // defer past this script's synchronous top-level execution
   if (typeof window.supabase === "undefined") {
@@ -1539,6 +1606,14 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 
   document.getElementById("signOutBtn").addEventListener("click", async () => {
     await supabaseClient.auth.signOut();
+  });
+
+  document.getElementById("changePasswordBtn").addEventListener("click", openChangePasswordModal);
+  document.getElementById("changePasswordCancel").addEventListener("click", closeChangePasswordModal);
+  document.getElementById("changePasswordClose").addEventListener("click", closeChangePasswordModal);
+  document.getElementById("changePasswordSave").addEventListener("click", saveNewPassword);
+  document.getElementById("changePasswordBackdrop").addEventListener("click", (e) => {
+    if (e.target.id === "changePasswordBackdrop") closeChangePasswordModal();
   });
 
   supabaseClient.auth.onAuthStateChange((event, session) => {
@@ -3470,6 +3545,7 @@ document.addEventListener("keydown", (e) => {
   if (!personModalBackdrop.hidden) closePersonModal();
   if (!identityModalBackdrop.hidden) closeIdentityModal();
   if (!deleteStatusModalBackdrop.hidden) closeDeleteStatusModal();
+  if (!document.getElementById("changePasswordBackdrop").hidden) closeChangePasswordModal();
 });
 
 document.addEventListener("input", (e) => {
