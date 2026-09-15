@@ -1340,6 +1340,13 @@ const panelsEl = document.getElementById("panels");
 const STATE_KEY = "project-board-state-v1";
 const SUPABASE_URL = "https://nhgagxdhpdckxnqsbyxw.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_RIQSNU7A46uaa5o1W08IcQ_fJ5w_Bpp";
+// Must match ADMIN_EMAIL in supabase-edge-function/manage-users.ts — this
+// constant only hides/shows the UI; the Edge Function is what actually
+// enforces it, so changing this alone does not grant real access.
+const ADMIN_EMAIL = "wim@hawktivity.com";
+function isAdmin(){
+  return !!(authSession && authSession.user && authSession.user.email === ADMIN_EMAIL);
+}
 const BOARD_DATA_ROW = "data";
 const BOARD_PHOTOS_ROW = "photos";
 let supabaseClient = null;
@@ -2347,6 +2354,21 @@ function renderSettings(){
         <button type="button" class="btn btn-secondary" id="settingsActionAddConfirm">Add status</button>
       </div>
     </div>
+    ${isAdmin() ? `
+    <div class="settings-section">
+      <div class="settings-section-title">User management</div>
+      <p class="field-hint">Only ${ADMIN_EMAIL} can see this section. Invited people get an email with a link to set their own password.</p>
+      <div class="add-option-form" style="margin-top:0; flex-direction:row; gap:8px; align-items:center;">
+        <input id="inviteUserEmail" type="email" autocomplete="off" placeholder="teammate@example.com" style="flex:1;">
+        <button type="button" class="btn btn-secondary" id="inviteUserBtn">Send invite</button>
+      </div>
+      <div class="modal-error" id="inviteUserError" hidden></div>
+      <p class="field-hint" id="inviteUserStatus"></p>
+      <div class="settings-status-list" id="userListContainer" style="margin-top:14px;">
+        <p class="summary-facts">Loading users…</p>
+      </div>
+    </div>
+    ` : ""}
   `;
 
   document.getElementById("settingsHealthColorPresets").innerHTML = COLOR_PRESETS.map(hex => `
@@ -2360,6 +2382,77 @@ function renderSettings(){
   if (healthRenameInput){ healthRenameInput.focus(); healthRenameInput.select(); }
   const actionRenameInput = document.getElementById("settingsActionRenameInput");
   if (actionRenameInput){ actionRenameInput.focus(); actionRenameInput.select(); }
+
+  if (isAdmin()) loadAndRenderUserList();
+}
+
+function buildUserRow(u){
+  const row = document.createElement("div");
+  row.className = "settings-status-row";
+  const isSelf = authSession && authSession.user.id === u.id;
+  const lastSignIn = u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : "Never signed in";
+  row.innerHTML = `
+    <div class="settings-status-label">${u.email}</div>
+    <div class="settings-status-usage">${lastSignIn}</div>
+    <div class="settings-status-actions">
+      ${isSelf ? "" : `<button type="button" class="btn btn-text" data-remove-user="${u.id}" data-user-email="${u.email}">Remove</button>`}
+    </div>
+  `;
+  return row;
+}
+
+async function loadAndRenderUserList(){
+  const container = document.getElementById("userListContainer");
+  if (!container) return;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "list" } });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    if (document.getElementById("userListContainer") !== container) return; // navigated away while loading
+    container.innerHTML = "";
+    data.users.forEach(u => container.appendChild(buildUserRow(u)));
+  } catch (e) {
+    container.innerHTML = `<p class="summary-facts">Couldn't load users: ${e.message} — has the manage-users Edge Function been deployed?</p>`;
+  }
+}
+
+async function removeUser(userId, email){
+  if (!window.confirm(`Remove ${email}? They will lose access to the board immediately.`)) return;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "delete", userId } });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    loadAndRenderUserList();
+  } catch (e) {
+    alert("Couldn't remove user: " + e.message);
+  }
+}
+
+async function inviteUser(){
+  const emailInput = document.getElementById("inviteUserEmail");
+  const errorEl = document.getElementById("inviteUserError");
+  const statusEl = document.getElementById("inviteUserStatus");
+  errorEl.hidden = true;
+  statusEl.textContent = "";
+  const email = emailInput.value.trim();
+  if (!email){
+    errorEl.textContent = "Please enter an email address.";
+    errorEl.hidden = false;
+    return;
+  }
+  statusEl.textContent = "Sending invite…";
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "invite", email } });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    emailInput.value = "";
+    statusEl.textContent = "Invite sent to " + email + ".";
+    loadAndRenderUserList();
+  } catch (e) {
+    statusEl.textContent = "";
+    errorEl.textContent = e.message;
+    errorEl.hidden = false;
+  }
 }
 
 function commitRenameHealth(value){
@@ -3557,6 +3650,15 @@ document.addEventListener("input", (e) => {
 document.addEventListener("click", (e) => {
   if (e.target.closest("#addProjectBtn")){
     openNewProjectModal();
+    return;
+  }
+  if (e.target.closest("#inviteUserBtn")){
+    inviteUser();
+    return;
+  }
+  const removeUserBtn = e.target.closest("[data-remove-user]");
+  if (removeUserBtn){
+    removeUser(removeUserBtn.dataset.removeUser, removeUserBtn.dataset.userEmail);
     return;
   }
   if (e.target.closest("#settingsHealthAddToggle")){

@@ -21,10 +21,14 @@ when you open the live site** — all one-time, no-code steps:
 3. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
+4. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
+   powers the Settings page's "User management" section (invite/remove
+   people); everything else works without it.
 
-Once all three are done, push the code (see Part 1) and the live site
-will save, sync, and log activity for real, for anyone you've created an
-account for.
+Once the first three are done, push the code (see Part 1) and the live
+site will save, sync, and log activity for real, for anyone you've
+created an account for. Part 5 (Edge Function) is separate and only
+needed for in-app invite/remove.
 
 ---
 
@@ -222,6 +226,48 @@ only if a specific need for something more restrictive comes up.
 
 ---
 
+## Part 5 — Deploy the user-management Edge Function
+
+The Settings page has an admin-only "User management" section (invite
+people by email, remove accounts). It only works for the account whose
+email matches `ADMIN_EMAIL` in `supabase-edge-function/manage-users.ts`
+(currently `wim@hawktivity.com`) — everyone else won't even see that
+section.
+
+**Why this needs a separate step:** inviting and deleting users requires
+Supabase's admin API, which only works with the `service_role` key — an
+all-powerful secret that must never be embedded in the app's client-side
+code (unlike the public key already in `index.html`, this one bypasses
+every security rule). An Edge Function is a small piece of code that
+Supabase runs on its own servers, where that secret can stay hidden while
+still letting the app call it safely over the internet.
+
+1. In your Supabase project, go to **Edge Functions** (left sidebar).
+2. Click **Deploy a new function** (or **Create function** — wording
+   varies slightly by Supabase version).
+3. Name it exactly `manage-users` (the app calls it by this name).
+4. Open `supabase-edge-function/manage-users.ts` from this project folder,
+   select all, copy it, and paste it into the function's code editor,
+   replacing whatever template code is there.
+5. Click **Deploy**. Supabase automatically provides the function with
+   the project's URL and service_role key — you don't need to enter or
+   copy those anywhere yourself.
+6. Test it: sign in to your live site as `wim@hawktivity.com`, open
+   **Settings**, and you should see "User management" at the bottom with
+   a list of current users instead of an error.
+
+If your Supabase project doesn't show a code editor for this (some
+older or restricted plans don't), the alternative is installing the
+[Supabase CLI](https://supabase.com/docs/guides/cli) and running
+`supabase functions deploy manage-users` from this project folder — ask
+for help with this if the dashboard option isn't available to you.
+
+**If the admin account ever needs to change:** edit the `ADMIN_EMAIL`
+line near the top of `supabase-edge-function/manage-users.ts`, then
+repeat steps 4-5 above to redeploy with the new value.
+
+---
+
 ## Quick reference — what you have after this guide
 
 | Thing | Where |
@@ -236,6 +282,7 @@ only if a specific need for something more restrictive comes up.
 | Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
+| Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 
 ## Making future changes
 
