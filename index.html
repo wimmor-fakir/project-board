@@ -2401,12 +2401,25 @@ function buildUserRow(u){
   return row;
 }
 
+async function describeFunctionError(error){
+  // supabase-js's default error.message for a non-2xx response is just
+  // "Edge Function returned a non-2xx status code" — the useful detail is
+  // the JSON body the function actually sent, reachable via error.context.
+  if (error && error.context && typeof error.context.json === "function"){
+    try {
+      const body = await error.context.json();
+      if (body && body.error) return body.error;
+    } catch (e) { /* body wasn't JSON — fall through to the generic message */ }
+  }
+  return (error && error.message) || String(error);
+}
+
 async function loadAndRenderUserList(){
   const container = document.getElementById("userListContainer");
   if (!container) return;
   try {
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "list" } });
-    if (error) throw error;
+    if (error) throw new Error(await describeFunctionError(error));
     if (data && data.error) throw new Error(data.error);
     if (document.getElementById("userListContainer") !== container) return; // navigated away while loading
     container.innerHTML = "";
@@ -2420,7 +2433,7 @@ async function removeUser(userId, email){
   if (!window.confirm(`Remove ${email}? They will lose access to the board immediately.`)) return;
   try {
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "delete", userId } });
-    if (error) throw error;
+    if (error) throw new Error(await describeFunctionError(error));
     if (data && data.error) throw new Error(data.error);
     loadAndRenderUserList();
   } catch (e) {
@@ -2443,7 +2456,7 @@ async function inviteUser(){
   statusEl.textContent = "Sending invite…";
   try {
     const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "invite", email } });
-    if (error) throw error;
+    if (error) throw new Error(await describeFunctionError(error));
     if (data && data.error) throw new Error(data.error);
     emailInput.value = "";
     statusEl.textContent = "Invite sent to " + email + ".";
