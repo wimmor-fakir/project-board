@@ -3,31 +3,24 @@
 A beginner-friendly walkthrough for taking `index.html` off your
 C: drive and hosting it as a real website, with Supabase as the database.
 
-## Read this first — an important gap
+## Status: the code is wired up
 
-Right now, this app saves its data using a feature that only exists
-**inside Claude.ai** (when the page is opened as a "Claude Artifact"). Once
-you host the file yourself on GitHub Pages, that feature is gone — the
-page will load and look the same, but nothing you type or change will be
-saved anywhere. It'll disappear the moment you refresh the page.
+`index.html` now talks to Supabase directly (instead of Claude's Artifact
+database) and requires sign-in before showing the board, matching the
+access decision in Part 4. **Two things still need doing before it
+actually works when you open the live site** — both are one-time, no-code
+steps:
 
-To fix that, the app's code needs to be changed so that, instead of
-talking to Claude's database, it talks to your Supabase database directly
-(Supabase gives you a small JavaScript library and a web address for this).
-That's a real code change to `index.html`, not just a hosting
-setting — and it isn't covered in this guide, since you asked for the
-hosting instructions on their own.
+1. **Run the setup SQL** — see `supabase-setup.sql` in this same folder.
+   Open it, copy its contents, paste into Supabase → **SQL Editor** → New
+   query, and click **Run**. This creates the table the app saves to and
+   the security rule that requires sign-in.
+2. **Create at least one user account for yourself** — see Part 4 below
+   ("You can do this part now, directly in Supabase"). Without an
+   account, the sign-in screen has no one to let in.
 
-**What this guide gets you:** the site live on the internet, and a
-Supabase project ready and waiting.
-**What it doesn't get you yet:** the site actually saving data to that
-Supabase project. For that, come back and ask to have the code wired up —
-it's a separate, self-contained step you can do at any time after this.
-
-If you'd rather skip all of this, the site already works today, for free,
-simply by staying a Claude Artifact — no hosting or database setup needed.
-This guide is for when you specifically want your own web address and your
-own database outside of Claude.
+Once both are done, push the code (see Part 1) and the live site will
+save and sync for real, for anyone you've created an account for.
 
 ---
 
@@ -111,8 +104,10 @@ git push
    filename on the end required.
 
 That's it — the page is now genuinely on the world wide web, and anyone
-with the link can open it. Remember the caveat from the top of this guide:
-it will look right, but nothing typed into it will be saved yet.
+with the link can open it. Remember the "Status" note at the top of this
+guide: the sign-in screen will show, but nobody can actually get in or
+save anything until you've run `supabase-setup.sql` and created a user
+account (Part 4).
 
 ---
 
@@ -135,15 +130,12 @@ This sets up the database that will eventually hold your board's data.
    - **Project URL** — looks like `https://abcdefgh.supabase.co`
    - **anon public** key — a long string of letters and numbers
 
-   Keep this settings page bookmarked; you'll need to copy these two
-   values into the app's code when it's time to connect it (that's the
-   step described in "Read this first" above).
+   Keep this settings page bookmarked — these are the same Project URL
+   and key already built into `index.html`, so you shouldn't need them
+   again unless you create a different Supabase project later.
 
-At this point your Supabase project exists and is empty — no tables yet.
-Setting up the actual table (to hold projects, action items, etc.) and
-wiring the app to read and write to it is exactly the code-change step
-mentioned at the top: come back and ask for that whenever you're ready,
-and hand over the Project URL and anon key from this step.
+At this point your Supabase project exists but has no tables yet — that's
+what `supabase-setup.sql` is for (see "Status" at the top of this guide).
 
 ---
 
@@ -195,35 +187,25 @@ that's still genuinely secure:
 - **Signed out = nothing.** No board data is visible to anyone who
   hasn't been explicitly added.
 
-This needs two things, one you can do now and one that comes with the
-future code step:
+**The code side is done** — `index.html` has a login screen (email +
+password, using Supabase's own sign-in function), and `supabase-setup.sql`
+creates the Row Level Security rule that only allows signed-in users to
+read or write the board's data.
 
-**You can do this part now, directly in Supabase — no code needed:**
+**What's left is entirely on the Supabase side, no code needed:**
 
-1. In your Supabase project, go to **Authentication** (left sidebar).
-2. Under **Providers**, confirm **Email** is enabled (it is by default).
-3. Go to **Authentication → Users** and click **Add user** → **Create new
+1. Run `supabase-setup.sql` if you haven't already (see "Status" at the
+   top of this guide).
+2. In your Supabase project, go to **Authentication** (left sidebar).
+3. Under **Providers**, confirm **Email** is enabled (it is by default).
+4. Go to **Authentication → Users** and click **Add user** → **Create new
    user** for yourself and each teammate who should have access. Use
    "Auto Confirm User" so they don't need to click an email link the
    first time (you can also invite by email instead, which sends them a
    sign-up link — either works).
-4. Set a temporary password for each person, and share it with them
-   privately (not over email in plain text) — tell them to change it on
-   first login once the app supports that, or reset it via Supabase later.
-
-**This part comes with the future code-wiring step**, since it needs
-actual application code, not just Supabase settings:
-
-- A login screen in `index.html` (email + password, using
-  Supabase's own sign-in function).
-- A Row Level Security policy on your data table along the lines of
-  "allow all actions for any signed-in user" — one short rule, written
-  once when the table is created.
-
-When you come back to have the app wired up to Supabase, mention that
-you want sign-in included — it's a natural part of that same step rather
-than a separate one, and the users you create above will be ready and
-waiting for it.
+5. Set a temporary password for each person, and share it with them
+   privately (not over email in plain text) — Supabase's dashboard lets
+   you reset anyone's password later if they need to change it.
 
 ### If you want to change this later
 
@@ -242,14 +224,13 @@ only if a specific need for something more restrictive comes up.
 |---|---|
 | Your code, versioned | `github.com/YOUR-USERNAME/project-board` |
 | Your live website | `YOUR-USERNAME.github.io/project-board/` |
-| Your database (empty, unconnected) | Your Supabase project dashboard |
-| Teammate accounts (if you added them in Part 4) | Supabase → Authentication → Users |
+| Your database, wired up and code-complete | Your Supabase project dashboard |
+| Teammate accounts (add these in Part 4) | Supabase → Authentication → Users |
 
 | Still to do | Why |
 |---|---|
-| Rewrite the app's save/load code to call Supabase instead of Claude's database | Otherwise nothing typed on the hosted site is saved anywhere |
-| Create a table in Supabase for the board's data | The database has no structure yet |
-| Add a sign-in screen to the app, and a Row Level Security rule allowing signed-in users | Without this, either nobody can read/write the data (locked by default) or — if a rule is added carelessly — anyone on the internet can. See Part 4 for the chosen approach |
+| Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
+| Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 
 ## Making future changes
 

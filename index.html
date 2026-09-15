@@ -817,6 +817,7 @@
         <button type="button" class="undo-redo-btn" id="undoBtn" title="Undo (Ctrl+Z)" disabled="">↶ Undo</button>
         <button type="button" class="undo-redo-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled="">↷ Redo</button>
         <button type="button" class="undo-redo-btn" id="exportBtn" title="Copy this project's update for Slack">📋 Copy for Slack</button>
+        <button type="button" class="undo-redo-btn" id="signOutBtn" title="Sign out" hidden="">⎋ Sign out</button>
         <span>Board synced <span class="mono" id="syncTime">just now</span><span id="saveStatusSep" hidden=""> · </span><span class="save-status" id="saveStatus"></span><span class="save-status" id="exportStatus"></span></span>
       </div>
     </div>
@@ -824,6 +825,32 @@
     <div class="panels" id="panels"></div>
     <div class="data-note">Rainbow Chicken reflects real project detail; the other projects are example data — replace them with your own.</div>
   </main>
+</div>
+
+<div class="modal-backdrop" id="authGateBackdrop" hidden="">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authGateTitle">
+    <div class="modal-head">
+      <h3 id="authGateTitle">Sign in</h3>
+    </div>
+    <div class="modal-body">
+      <p class="field-hint">Ask whoever set this board up to create an account for you — there's no self-signup.</p>
+      <label class="field">
+        <span>Email</span>
+        <input id="authEmail" type="email" autocomplete="username">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="authPassword" type="password" autocomplete="current-password">
+      </label>
+      <div class="modal-error" id="authError" hidden></div>
+    </div>
+    <div class="modal-foot">
+      <div></div>
+      <div class="modal-foot-right">
+        <button class="btn btn-primary" id="authSignInBtn" type="button">Sign in</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal-backdrop" id="itemModalBackdrop" hidden="">
@@ -1106,8 +1133,8 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const PRISTINE_HTML = document.documentElement.outerHTML;
 const PROJECTS = /*PROJECTS_START*/[{"id":"rainbow","name":"Rainbow Chicken","health":"poc","note":"Route 1 outcome depends on the Tender Evaluation Committee's decision — no award confirmed yet, and R220k of Year-1 revenue is contingent on the 90-day SAT trial. Route 2 has no signed agreement yet; dependent on Remmert van Rijswijk's sign-off. Pursuing both routes with the same customer needs clear internal alignment on which is prioritised if both progress.","noteUpdatedAt":"2026-09-08","statusNotes":[{"date":"2026-09-08","text":"P&P billing clean-up: Demi to invoice Hawktivity for the cost of data to date, and to invoice monthly for the router rental; Wim to take over recharging the mobile data."},{"date":"2026-09-08","text":"Wim to move Rainbow Chicken onto their own wifi and return the router once transitioned."},{"date":"2026-09-03","text":"Very good meeting showing them the dashboard and initial metrics — they've asked for more metrics and want a proposal where Hawktivity does the work but they only start paying monthly from the post-pilot phase."},{"date":"2026-09-03","text":"Also sent a proposal in response to an RFP for measurements on a different type of line, which they then want to roll out to 12–14 lines nationwide."},{"date":"2026-09-09","text":"Test status"},{"date":"2026-09-10","text":"Next major milestone is meeting Wednesday 16 Sept:\nA: Ishebo line:\n1. Show work to date (shifts added)\n2. Discuss how to move to paying model for rest of changes required\n3. Additional camera installation"}],"route1":{"title":"Route 1 — RFP: AI Vision Inspection System","updates":[{"date":"2026-09-09","text":"Jaco (Rainbow Chicken) to send the rest of the follow-up email from the meeting — ASAP."},{"date":"2026-09-03","text":"Richard to respond to the Tender Evaluation Committee's change requests on the Commercial & Technical Proposal — in progress."},{"date":"2026-09-03","text":"Richard to send PC specs to Rainbow Chicken — by 3 Sept."},{"date":"2026-09-03","text":"Commercial & Technical Proposal submitted for Rustenburg ACM Lines; Tender Evaluation Committee raised follow-up questions / change requests."}]},"route2":{"title":"Route 2 — Recurring Monthly Service","updates":[{"date":"2026-09-03","text":"Richard to finalise and send the proposal to Remmert van Rijswijk, positioned as the lower-capex, faster-to-close alternative to Route 1 — ASAP."},{"date":"2026-09-03","text":"Team to keep running the pilot dashboard for Rainbow Chicken until the Route 2 proposal is agreed — ongoing."},{"date":"2026-09-03","text":"Proposal being drafted as a lower-capex alternative to Route 1; installation, once confirmed, proceeds via Mark v O's contact."}]},"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Demi Marais","role":"Billing","company":"Plug&Play"},{"name":"Hardus Richter","role":"Backend engineer","company":"Hawktivity"},{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"}]},{"id":"hungry-lion","name":"Hungry Lion","health":"ongoing-and-poc","note":"Heavy revenue dependence on Hungry Lion income remains a standing business risk — actively working to diversify with other customers. Risk of investing significant development effort (video replay, backend rework) without it leading to a wider rollout. The relationship has swung between decommissioning talk and growth mode before, and could shift again.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Long-standing paying account since 2024, expanded to include Zambia — 114 cameras live across current stores."},{"date":"2026-09-09","text":"Store-count reduction and \"damage control\" discussions through late 2025 into early 2026 have settled; no further reductions reported for now."},{"date":"2026-09-09","text":"New dashboard with much-improved video replay functionality launching shortly (shared build with Chep) — Hungry Lion already relies heavily on video."},{"date":"2026-09-09","text":"Backend clean-up under way with Marc to reduce AWS data-storage costs alongside the new feature build."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Hardus Richter","role":"Backend engineer"},{"name":"Luke White","role":"Client contact","company":"Servios"},{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"}]},{"id":"ackermans","name":"Ackermans","health":"ongoing-but-sort-out-invoicing","note":"20-store rollout depends on Abdul's sign-off on the quote — timing not yet confirmed. 100-store target by Jan 2027 is ambitious relative to current pace — needs sustained install capacity (PCs, on-site setup). Smart watch integration is still a to-do, not yet built — could slip given the team's many other active accounts.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Store of the Future rollout under way — quote sent for 20 stores; hoping for quick approval and an install start around October 2026."},{"date":"2026-09-09","text":"Longer-term target: 100 installs by January 2027."},{"date":"2026-09-09","text":"Alerts agreed and live; manager training under way to drive adoption."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Demi Marais","role":"Commercial support","company":"Plug&Play"},{"name":"Lizzie","role":"Billing","company":"Plug&Play"},{"name":"Prince","role":"Operations","company":"Plug&Play"},{"name":"Jason","role":"Operations","company":"Plug&Play"},{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"}]},{"id":"clicks","name":"Clicks","health":"ongoing-but-sort-out-invoicing","note":"EY Basket/Gondola revenue route is closed for now — budget didn't allow it. Store of the Future stakeholder meeting not yet scheduled — depends on Demi. Queue-shortening angle depends on Richard's reworked data analysis and Demi assembling the right Clicks stakeholders.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"EY Basket/Gondola pilot is now on pause — doesn't fit EY's budget."},{"date":"2026-09-09","text":"New parallel focus: Clicks Store of the Future, plus showing that smart interventions can make queues shorter using newly available data."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Demi Marais","role":"Client contact","company":"Plug&Play"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"clicks-unicare","name":"Clicks Unicare","health":"poc","note":"4-store expansion depends on Clicks Unicare approving the (soon to be updated) quote — not yet confirmed as of Aug 2026.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Existing pilot live since mid-2026 under the Clicks Unicare / MKEM / MChem stores."},{"date":"2026-09-09","text":"Quote sent for a 4-store expansion (Jun 2026); still awaiting an answer as of Aug 24, 2026."}],"people":[{"name":"Demi Marais","role":"Commercial support","company":"Plug&Play"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"rohloff-kfc","name":"Rohloff (KFC)","health":"poc","note":"Invoicing is contingent on DT accuracy clearing the bar — not yet confirmed. Multi-store pilot is still framed as 'Proof of Value,' not yet a standard paying account.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Paid multi-store pilot across Rohloff's KFC franchise stores through 2026; goal remains 'Proof of Value.'"},{"date":"2026-09-09","text":"Sep 2, 2026: work under way to improve Drive-Thru (DT) accuracy before turning alerts and invoicing on."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Hardus Richter","role":"Backend engineer"}]},{"id":"pedros","name":"Pedro's","health":"poc","note":"Roll-out depends on proving kitchen-camera value first; not yet demonstrated beyond the pilot store.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Single-store pilot running since 2025/26, centred on kitchen cameras."},{"date":"2026-09-09","text":"Goal (Aug 2026): wide roll-out, justified by the value already shown."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"sorbet","name":"Sorbet","health":"poc","note":"18-store rollout depends on Sorbet approving the quote — not yet confirmed. 200-franchise rollout is an early, unconfirmed opportunity — no commercial terms discussed yet.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Pilot store live in 2026, producing an insights report for corporate decision-makers."},{"date":"2026-09-09","text":"Sep 2, 2026: very positive meeting — decision-makers engaged strongly with the data insights presented."}],"people":[{"name":"Demi Marais","role":"Commercial support","company":"Plug&Play"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"pep","name":"PEP (incl. Canal Walk)","health":"ongoing-but-sort-out-invoicing","note":"15-store expansion isn't approved yet; hinges on the outcome of the 23 Sept meeting. Expansion to other PEP stores is an early, unconfirmed opportunity — no commercial terms discussed yet.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Canal Walk pilot re-installed after the store's 2026 revamp."},{"date":"2026-09-09","text":"Sep 2, 2026: first meeting held with decision-makers about installing across 15 stores; a follow-up install meeting is set for 23 Sept 2026."}],"people":[{"name":"Demi Marais","role":"Commercial support","company":"Plug&Play"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"king-pie","name":"King Pie","health":"blocked","note":"Long-running (2025–26) pilot has never converted to paying — real risk the engagement ends if value isn't shown soon.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Multi-year pilot (2025–26) that has never converted to a paying account."},{"date":"2026-09-09","text":"Aug 2026 goal is explicit: make it useful enough that King Pie will pay, or stop completely."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"jumbo-mall","name":"Jumbo Mall","health":"ongoing-but-sort-out-invoicing","note":"4 Sept meeting was canceled by the client — follow-through now depends on the rescheduled meeting next week.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Footfall-counting account, monitored for stability. Wim and Richard have also joined the project."},{"date":"2026-09-09","text":"Sep 4, 2026: Quinton (Skylytics) confirms the 12h00 meeting was canceled by the client; a new meeting is being set for next week, and the presentation was already sent by email."}],"people":[{"name":"Hardus Richter","role":"Account lead"},{"name":"Lizzie","role":"Billing"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"pineslopes","name":"Pineslopes (Car Counting)","health":"ongoing-but-sort-out-invoicing","note":"No update since Jun 2026 — accuracy status should be reconfirmed. Entry 4 fibre cable anomaly (lying in the water) is unresolved — could affect data quality until fixed.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Car-counting pilot, monitored for accuracy."},{"date":"2026-09-09","text":"No update recorded in the planning notes since Jun 2026."}],"people":[{"name":"Lizzie","role":"Billing"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Prince","role":"Operations","company":"Plug&Play"}]},{"id":"goldwagen","name":"Goldwagen","health":"poc","note":"No update since Jun 12, 2026 — dashboard onboarding status should be reconfirmed at the follow-up.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Pilot store live since Jun 2026; dashboard onboarding under way."},{"date":"2026-09-09","text":"No update recorded in the planning notes since Jun 12, 2026."}],"people":[{"name":"Demi Marais","role":"Commercial support","company":"Plug&Play"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"uk-darts","name":"UK Darts","health":"own","note":"Short timeline to the October 2026 install target. The original Launchpad/Sozo JV was paused by a commercial dispute in Mar 2026 — the direct-sales pivot is still new.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Pivoted (Aug 2026) from the paused Launchpad/Sozo JV (see Pinpointe Darts) to selling Hawktivity's own darts hardware directly to UK pubs."},{"date":"2026-09-09","text":"Sep 2, 2026: 2 pubs have agreed to install; hardware is being manufactured for testing ahead of UK assembly."},{"date":"2026-09-09","text":"Strong UK team in place: Brian Howe and his brother Matt are helping with the first 2 boards for free, in exchange for future equity/income once revenue starts."}],"people":[{"name":"Waldo Minnaar","role":"Hardware engineer","company":"Hawktivity"},{"name":"Brian Howe","role":"UK partner"},{"name":"Matt Howe","role":"UK partner","company":""},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"}]},{"id":"launchpad-clips","name":"Launchpad Celebration Clips","health":"poc","note":"Multi-year project (since mid-2024) still not fully live; invoicing milestones have slipped multiple times.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Multi-year Calgary project (via Inrange) since mid-2024, still not fully live as of Aug 2026."},{"date":"2026-09-09","text":"$50k + $50k invoicing milestones tied to go-live have repeatedly slipped."}],"people":[{"name":"Everhard Louw","role":"Data engineer","company":"Hawktivity"}]},{"id":"ice-hockey-social","name":"Ice Hockey Social","health":"service-work","note":"Low-light accuracy is unproven; the client has already started evening testing ahead of that work being done.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Calgary hockey simulator R&D project, improving tracking accuracy since late 2025."},{"date":"2026-09-09","text":"Sep 2, 2026: the client has suddenly started testing in the evening — surfacing a new low-light accuracy gap. Everhard communicates directly with the client, who sounds quite happy."},{"date":"2026-09-11","text":"Everhard reporting good results, but Sept could be last month for a while"}],"people":[{"name":"Everhard Louw","role":"Data engineer","company":"Hawktivity"}]},{"id":"chep","name":"Chep (Kraaifontein & PE)","health":"ongoing","note":"Chep has flagged 'not getting enough value' in nearly every planning entry since 2024 — a standing, long-running concern.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Paying client since 2024 across Kraaifontein & PE; relationship continues through 2026."},{"date":"2026-09-09","text":"Sep 2, 2026: the Chep/Hungry Lion video-replay loop is still ongoing — shared functionality under development for both accounts."}],"people":[{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Hardus Richter","role":"Backend engineer","company":"Hawktivity"}]},{"id":"massmart","name":"MassMart (Makro Pilot)","health":"poc","note":"Still at the conversation/interest stage — no pilot scope, timeline, or named contact confirmed yet.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"New prospect — Sep 2, 2026: a very good conversation with Massmart, who are strongly interested in doing a pilot at Makro."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"nandos-canada","name":"Nando's Canada","health":"poc","note":"No commercial commitment yet — this is still development/pilot work, and Hawktivity capacity is being prioritised for customers who've already committed post-pilot, which has caused visible delays. All measurement is still remote/offline — no onsite PC yet, so live metrics and dashboards can't start until installation happens.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Single-store pilot since Apr 2026: Meraki cameras + Speed-of-Service tracking (queuing, transaction time, footfall, dwell time, time-at-table)."},{"date":"2026-09-09","text":"Sep 3, 2026: Johann got Meraki video downloads working, but not fast enough yet for live metrics — the processing PC still needs to go in-store. Multi-camera person tracking (needed to link counter order to table) is close to release."},{"date":"2026-09-09","text":"Richard has flagged delays to Prem, citing capacity constraints while prioritising roll-outs for customers who've already committed post-pilot."}],"people":[{"name":"Hardus Richter","role":"Team member","company":"Hawktivity"},{"name":"Everhard Louw","role":"Data engineer","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Regardt Visagie","role":"Commercial lead","company":"Hawktivity"},{"name":"Johann Mocke","role":"Team member","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"chasing-aces","name":"Chasing Aces","health":"poc","note":"Still pre-camera-access — no scope, timeline or commercial terms exist yet; everything depends on John granting access. Single contact (John) and a single meeting so far — no wider Chasing Aces stakeholder engagement yet.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"Brand-new prospect — Richard met John (Chasing Aces) in person in late Aug 2026 and is excited about the possibilities for Hawktivity's tech there."},{"date":"2026-09-09","text":"Sep 3, 2026: Richard emailed John requesting access to Chasing Aces' existing cameras (in-bay on the range, at the greens, and on the tee box if one exists) — awaiting response."},{"date":"2026-09-09","text":"Wim cc'd and asked to own follow-up to keep the opportunity moving."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"}]},{"id":"pinpointe-darts","name":"Pinpointe Darts","health":"service-work","note":"Barry's cashflow strain (~$40k/month personally funded) raises doubt he can settle outstanding invoices or sustain the JV. Deal terms still being negotiated — no signed agreement yet; risk of scope creep if Sozo support gets bundled into the deal.","noteUpdatedAt":"2026-09-09","statusNotes":[{"date":"2026-09-09","text":"PinPointe Social Club Ltd JV with Barry Ehlert (LaunchPad Golf) and Jim Brent (Windmill Golf) — separate from Hawktivity's own UK Darts hardware pivot (see UK Darts)."},{"date":"2026-09-09","text":"Aug 24, 2026: Richard sent a statement for 4 outstanding invoices (INV-0232, INV-0214, INV-0241, INV-0220); Hawktivity has been covering Sozo's invoices on Barry/Jim's behalf in the meantime."},{"date":"2026-09-09","text":"Barry's reply: the business is not going great — he's personally funding it ~$40,000/month, and is currently on a 3-week honeymoon."}],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"},{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Frans Meyer","role":"Advisor","company":"Alphawave"},{"name":"Waldo Minnaar","role":"Hardware engineer","company":"Hawktivity"}]},{"id":"crm-insights","name":"CRM Insights","health":"poc","note":"","noteUpdatedAt":"2026-09-10","statusNotes":[{"date":"2026-09-10","text":"Richard send questionaire"}],"people":[]},{"id":"cricket-social","name":"CricHit","health":"poc","note":"","noteUpdatedAt":"2026-09-10","statusNotes":[{"date":"2026-09-10","text":"Everhard demoing today"},{"date":"2026-09-11","text":"Demo on 10 Sept went very well. Next steps?"}],"people":[{"name":"Everhard Louw","role":"Team member"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"internal-ops","name":"Internal Operations","health":"own","note":"","noteUpdatedAt":"2026-09-11","statusNotes":[],"people":[{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Johann Mocke","role":"Team member","company":"Hawktivity"},{"name":"Hardus Richter","role":"Backend engineer","company":"Hawktivity"},{"name":"Everhard Louw","role":"Data engineer","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"factoryhawk","name":"Hawktivity Marketing","health":"own","note":"","noteUpdatedAt":"2026-09-11","statusNotes":[],"people":[{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]},{"id":"aw-connect","name":"AW Connect","health":"own","note":"","noteUpdatedAt":"2026-09-11","statusNotes":[{"date":"2026-09-11","text":"What is date of AW connect?"}],"people":[{"name":"Wim Morris","role":"Head of Operations","company":"Hawktivity"},{"name":"Richard Barry","role":"CEO","company":"Hawktivity"}]}]/*PROJECTS_END*/;
 const PEOPLE_ORDER = /*PEOPLE_ORDER_START*/["Richard Barry","Wim Morris","Jaco","Demi Marais","Hardus Richter","Waldo Minnaar","Luke White","Lizzie","Prince","Jason","Regardt Visagie","Everhard Louw","Brian Howe","Matt Howe","Frans Meyer","test","Johann Mocke"]/*PEOPLE_ORDER_END*/;
 const HEALTH_OPTIONS = /*HEALTH_OPTIONS_START*/[{"value":"blocked","label":"Blocked","color":"var(--danger)","soft":"var(--danger-soft)"},{"value":"poc","label":"POC","color":"#e41b57","soft":"rgba(228,27,87,0.16)"},{"value":"ongoing-and-poc","label":"Ongoing and POC","color":"#3d8a4a","soft":"rgba(61,138,74,0.16)"},{"value":"ongoing-but-sort-out-invoicing","label":"Ongoing but sort out invoicing","color":"#2a8365","soft":"rgba(42,131,101,0.16)"},{"value":"own","label":"Own","color":"#1f8a8a","soft":"rgba(31,138,138,0.16)"},{"value":"service-work","label":"Service Work","color":"#1f8a8a","soft":"rgba(31,138,138,0.16)"},{"value":"ongoing","label":"Ongoing","color":"#1f8a8a","soft":"rgba(31,138,138,0.16)"}]/*HEALTH_OPTIONS_END*/;
@@ -1269,10 +1296,12 @@ document.getElementById("railProjectSearch").addEventListener("input", (e) => se
 document.getElementById("mobileProjectSearch").addEventListener("input", (e) => setProjectNameQuery(e.target.value));
 const panelsEl = document.getElementById("panels");
 const STATE_KEY = "project-board-state-v1";
-const BOARD_DATA_DOC = "board/data";
-const BOARD_PHOTOS_DOC = "board/photos";
-let artifactCap = null;
-let dbCap = null;
+const SUPABASE_URL = "https://nhgagxdhpdckxnqsbyxw.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_RIQSNU7A46uaa5o1W08IcQ_fJ5w_Bpp";
+const BOARD_DATA_ROW = "data";
+const BOARD_PHOTOS_ROW = "photos";
+let supabaseClient = null;
+let authSession = null;
 let dbReady = false;
 let usingLocalFallback = false;
 let applyingRemoteUpdate = false;
@@ -1394,66 +1423,126 @@ function setSaveStatus(state){
   if (sep) sep.hidden = !state;
 }
 
-(async function initDbCapability(){
-  await Promise.resolve(); // defer past this script's synchronous top-level execution
-  try {
-    if (window.claude && typeof window.claude.use === "function") {
-      dbCap = await window.claude.use("db");
-    }
-  } catch (e) { dbCap = null; }
-  if (!dbCap) {
-    backfillCodes();
-    refreshAll();
-    return;
-  }
-  try {
-    const [dataSnap, photoSnap] = await Promise.all([
-      dbCap.doc(BOARD_DATA_DOC).get(),
-      dbCap.doc(BOARD_PHOTOS_DOC).get(),
-    ]);
-    if (dataSnap.exists || photoSnap.exists) {
-      applyingRemoteUpdate = true;
-      if (dataSnap.exists) applyBoardData(dataSnap.data());
-      if (photoSnap.exists) applyPhotoData(photoSnap.data());
-      applyingRemoteUpdate = false;
-      try { localStorage.removeItem(STATE_KEY); } catch (e) {}
-      usingLocalFallback = false;
-    }
-    // Backfill any missing project/action codes (also covers this artifact's
-    // very first run, seeding the database with the current — now coded — state).
-    backfillCodes();
-    dbReady = true;
-    setSaveStatus("saved");
-    refreshAll();
+function showAuthGate(){
+  document.getElementById("authGateBackdrop").hidden = false;
+  document.getElementById("signOutBtn").hidden = true;
+}
+function hideAuthGate(){
+  document.getElementById("authGateBackdrop").hidden = true;
+  document.getElementById("authError").hidden = true;
+  document.getElementById("signOutBtn").hidden = false;
+}
 
-    dbCap.doc(BOARD_DATA_DOC).onSnapshot((snap) => {
-      if (!snap.exists) return;
-      const incoming = snap.data();
-      if (JSON.stringify(incoming) === currentBoardDataJson()) return;
-      applyBoardData(incoming);
-      onRemoteDataChanged();
-    }, () => {});
-    dbCap.doc(BOARD_PHOTOS_DOC).onSnapshot((snap) => {
-      if (!snap.exists) return;
-      const incoming = snap.data();
-      if (JSON.stringify(incoming) === currentPhotoDataJson()) return;
-      applyPhotoData(incoming);
-      onRemoteDataChanged();
-    }, () => {});
+async function loadBoardFromSupabase(){
+  const { data, error } = await supabaseClient
+    .from("board_state")
+    .select("id, payload")
+    .in("id", [BOARD_DATA_ROW, BOARD_PHOTOS_ROW]);
+  if (error) throw error;
+  const dataRow = data.find(r => r.id === BOARD_DATA_ROW);
+  const photosRow = data.find(r => r.id === BOARD_PHOTOS_ROW);
+  if (dataRow || photosRow) {
+    applyingRemoteUpdate = true;
+    if (dataRow) applyBoardData(dataRow.payload);
+    if (photosRow) applyPhotoData(photosRow.payload);
+    applyingRemoteUpdate = false;
+    try { localStorage.removeItem(STATE_KEY); } catch (e) {}
+    usingLocalFallback = false;
+  }
+  // Backfill any missing project/action codes (also covers this board's very
+  // first run, seeding the database with the current — now coded — state).
+  backfillCodes();
+  dbReady = true;
+  setSaveStatus("saved");
+  refreshAll();
+}
+
+let realtimeSubscribed = false;
+function subscribeToBoardChanges(){
+  if (realtimeSubscribed) return;
+  realtimeSubscribed = true;
+  supabaseClient
+    .channel("board_state_changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "board_state" }, (payload) => {
+      const row = payload.new;
+      if (!row) return;
+      if (row.id === BOARD_DATA_ROW) {
+        if (JSON.stringify(row.payload) === currentBoardDataJson()) return;
+        applyBoardData(row.payload);
+        onRemoteDataChanged();
+      } else if (row.id === BOARD_PHOTOS_ROW) {
+        if (JSON.stringify(row.payload) === currentPhotoDataJson()) return;
+        applyPhotoData(row.payload);
+        onRemoteDataChanged();
+      }
+    })
+    .subscribe();
+}
+
+async function startAfterSignIn(){
+  hideAuthGate();
+  try {
+    await loadBoardFromSupabase();
+    subscribeToBoardChanges();
   } catch (e) {
     dbReady = false;
     backfillCodes();
     refreshAll();
   }
-})();
+}
 
-(async function initArtifactCapability(){
-  try {
-    if (window.claude && typeof window.claude.use === "function") {
-      artifactCap = await window.claude.use("artifact");
-    }
-  } catch (e) { artifactCap = null; }
-  if (usingLocalFallback && !dbReady) setSaveStatus("local");
+async function signIn(){
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const errorEl = document.getElementById("authError");
+  errorEl.hidden = true;
+  if (!email || !password){
+    errorEl.textContent = "Please enter your email and password.";
+    errorEl.hidden = false;
+    return;
+  }
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) {
+    errorEl.textContent = error.message;
+    errorEl.hidden = false;
+  }
+  // success is handled by onAuthStateChange, below
+}
+document.getElementById("authSignInBtn").addEventListener("click", signIn);
+document.getElementById("authPassword").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); signIn(); }
+});
+
+(async function initSupabase(){
+  await Promise.resolve(); // defer past this script's synchronous top-level execution
+  if (typeof window.supabase === "undefined") {
+    // Library failed to load (offline, blocked, etc.) — fall back to local-only mode.
+    backfillCodes();
+    refreshAll();
+    return;
+  }
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  document.getElementById("signOutBtn").addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+  });
+
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (event === "INITIAL_SESSION") return; // handled below via getSession()
+    authSession = session;
+    if (session) startAfterSignIn();
+    else showAuthGate();
+  });
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  authSession = session;
+  if (authSession) {
+    await startAfterSignIn();
+  } else {
+    backfillCodes();
+    refreshAll();
+    showAuthGate();
+  }
 })();
 
 /* ---------- Export (copy one project's update for Slack) ---------- */
@@ -1559,55 +1648,16 @@ async function copyForSlack(){
 
 document.getElementById("exportBtn").addEventListener("click", copyForSlack);
 
-function buildPublishHtml(){
-  const pStart = PRISTINE_HTML.indexOf("/*PROJECTS_START*/") + "/*PROJECTS_START*/".length;
-  const pEnd = PRISTINE_HTML.indexOf("/*PROJECTS_END*/");
-  const oStart = PRISTINE_HTML.indexOf("/*PEOPLE_ORDER_START*/") + "/*PEOPLE_ORDER_START*/".length;
-  const oEnd = PRISTINE_HTML.indexOf("/*PEOPLE_ORDER_END*/");
-  const hStart = PRISTINE_HTML.indexOf("/*HEALTH_OPTIONS_START*/") + "/*HEALTH_OPTIONS_START*/".length;
-  const hEnd = PRISTINE_HTML.indexOf("/*HEALTH_OPTIONS_END*/");
-  const asStart = PRISTINE_HTML.indexOf("/*ACTION_STATUS_OPTIONS_START*/") + "/*ACTION_STATUS_OPTIONS_START*/".length;
-  const asEnd = PRISTINE_HTML.indexOf("/*ACTION_STATUS_OPTIONS_END*/");
-  const acStart = PRISTINE_HTML.indexOf("/*ACTIONS_START*/") + "/*ACTIONS_START*/".length;
-  const acEnd = PRISTINE_HTML.indexOf("/*ACTIONS_END*/");
-  const phStart = PRISTINE_HTML.indexOf("/*PHOTO_URIS_START*/") + "/*PHOTO_URIS_START*/".length;
-  const phEnd = PRISTINE_HTML.indexOf("/*PHOTO_URIS_END*/");
-  const projectsJson = JSON.stringify(PROJECTS).replace(/</g, "\\u003c");
-  const orderJson = JSON.stringify(PEOPLE_ORDER).replace(/</g, "\\u003c");
-  const healthJson = JSON.stringify(HEALTH_OPTIONS).replace(/</g, "\\u003c");
-  const actionStatusJson = JSON.stringify(ACTION_STATUS_OPTIONS).replace(/</g, "\\u003c");
-  const actionsJson = JSON.stringify(ACTIONS).replace(/</g, "\\u003c");
-  const photosJson = JSON.stringify(PHOTO_URIS).replace(/</g, "\\u003c");
-  return "<!doctype html>"
-    + PRISTINE_HTML.slice(0, pStart) + projectsJson + PRISTINE_HTML.slice(pEnd, oStart)
-    + orderJson + PRISTINE_HTML.slice(oEnd, hStart)
-    + healthJson + PRISTINE_HTML.slice(hEnd, asStart)
-    + actionStatusJson + PRISTINE_HTML.slice(asEnd, acStart)
-    + actionsJson + PRISTINE_HTML.slice(acEnd, phStart)
-    + photosJson + PRISTINE_HTML.slice(phEnd);
-}
-
 async function publishState(){
   if (applyingRemoteUpdate) return; // this state came from the database — don't echo it back
-  if (dbCap) {
+  if (supabaseClient && authSession) {
     setSaveStatus("saving");
     try {
-      await Promise.all([
-        dbCap.doc(BOARD_DATA_DOC).set(JSON.parse(currentBoardDataJson())),
-        dbCap.doc(BOARD_PHOTOS_DOC).set(JSON.parse(currentPhotoDataJson())),
+      const { error } = await supabaseClient.from("board_state").upsert([
+        { id: BOARD_DATA_ROW, payload: JSON.parse(currentBoardDataJson()) },
+        { id: BOARD_PHOTOS_ROW, payload: JSON.parse(currentPhotoDataJson()) },
       ]);
-      try { localStorage.removeItem(STATE_KEY); } catch (e) {}
-      usingLocalFallback = false;
-      setSaveStatus("saved");
-    } catch (e) {
-      setSaveStatus("error");
-    }
-    return;
-  }
-  if (artifactCap) {
-    setSaveStatus("saving");
-    try {
-      await artifactCap.publish(buildPublishHtml());
+      if (error) throw error;
       try { localStorage.removeItem(STATE_KEY); } catch (e) {}
       usingLocalFallback = false;
       setSaveStatus("saved");
