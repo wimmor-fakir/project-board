@@ -84,7 +84,8 @@
   .app{
     display:grid;
     grid-template-columns: 248px 1fr;
-    min-height:100vh;
+    height:100vh;
+    overflow:hidden;
   }
 
   /* ---------- Sidebar / tabs ---------- */
@@ -189,7 +190,11 @@
   }
 
   /* ---------- Main ---------- */
-  .main{ padding:28px 32px 40px; min-width:0; }
+  .main{
+    padding:28px 32px 40px; min-width:0;
+    height:100vh; overflow-y:auto;
+    display:flex; flex-direction:column;
+  }
   .main-head{
     display:flex;
     align-items:baseline;
@@ -228,21 +233,34 @@
   .undo-redo-btn:hover:not(:disabled){ background:var(--surface-sunken); color:var(--ink); }
   .undo-redo-btn:disabled{ opacity:.35; cursor:not-allowed; }
   .undo-redo-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
-  .panels{ position:relative; }
+  .panels{ position:relative; flex:1; min-height:0; display:flex; flex-direction:column; }
   .panel{ display:none; }
   .panel.active{ display:block; }
+  .panel.project-panel.active{ display:flex; flex-direction:column; flex:1; min-height:0; }
 
   .layout{
     display:grid;
     grid-template-columns: 330px 1fr;
+    grid-template-rows: minmax(0, 1fr);
     gap:20px;
-    align-items:start;
+    flex:1;
+    min-height:0;
   }
+  .layout > .rtr-card{ min-height:0; overflow:hidden; }
+  .layout > .action-panel{ min-height:0; }
   .mobile-search-bar{ display:none; }
   .mobile-search-bar .rail-search-input{ margin-top:0; font-size:14px; padding:9px 12px; }
   @media (max-width: 900px){
-    .layout{ grid-template-columns: 1fr; }
-    .app{ grid-template-columns: 1fr; }
+    .app{ height:auto; overflow:visible; grid-template-columns: 1fr; }
+    .main{ height:auto; overflow-y:visible; display:block; }
+    .panels{ flex:none; display:block; }
+    .panel.project-panel.active{ display:block; flex:none; }
+    .layout{
+      grid-template-columns: 1fr;
+      grid-template-rows: none;
+      flex:none;
+    }
+    .layout > .rtr-card{ overflow:visible; }
     .rail{
       flex-direction:row;
       overflow-x:auto;
@@ -335,8 +353,17 @@
   .rtr-divider{ height:1px; background:var(--border); }
   .rtr-section-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:10px; }
   .rtr-section-row .rtr-section-title{ margin-bottom:0; }
-  .note-list-scroll{ max-height:230px; overflow-y:auto; padding-right:6px; }
-  .status-note-editable{ cursor:pointer; transition:background .1s ease, border-color .1s ease; }
+  .rtr-notes-block{ display:flex; flex-direction:column; flex:1; min-height:0; }
+  .note-list-scroll{ flex:1; min-height:60px; overflow-y:auto; padding-right:6px; }
+  @media (max-width: 900px){
+    .rtr-notes-block{ flex:none; }
+    .note-list-scroll{ flex:none; max-height:230px; }
+    .status-note-editable{ max-height:none; overflow-y:visible; }
+  }
+  .status-note-editable{
+    cursor:pointer; transition:background .1s ease, border-color .1s ease;
+    flex-shrink:0; max-height:220px; overflow-y:auto;
+  }
   .status-note-editable:hover{ background:var(--surface); border-color:var(--accent-soft-border); }
   .status-identity-editable{ cursor:pointer; border-radius:6px; transition:opacity .1s ease; }
   .status-identity-editable:hover{ opacity:.8; }
@@ -349,10 +376,10 @@
   .note-updated{ font-size:10.5px; color:var(--ink-3); white-space:nowrap; }
 
   /* ---------- Action list ---------- */
-  .action-panel{ display:flex; flex-direction:column; gap:14px; }
+  .action-panel{ display:flex; flex-direction:column; gap:14px; min-height:0; }
   .action-items-scroll{
     display:flex; flex-direction:column; gap:14px;
-    max-height:calc(100vh - 280px);
+    flex:1;
     min-height:160px;
     overflow-y:auto;
     padding-right:6px;
@@ -365,7 +392,8 @@
   .action-items-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
   .action-items-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
   @media (max-width: 900px){
-    .action-items-scroll{ max-height:none; overflow-y:visible; }
+    .action-panel{ min-height:0; }
+    .action-items-scroll{ flex:none; max-height:none; overflow-y:visible; }
   }
   .action-toolbar{
     display:flex; align-items:center; justify-content:space-between;
@@ -2764,7 +2792,7 @@ function buildStatusCard(p){
     : [];
   return `
     <div class="card rtr-card">
-      <div>
+      <div class="rtr-notes-block">
         <div class="rtr-section-row">
           <div class="rtr-section-title">Status notes</div>
           <button type="button" class="btn btn-new" data-new-note="${p.id}">+ New Status Update</button>
@@ -2783,7 +2811,7 @@ function buildStatusCard(p){
 
 function buildProjectPanel(p){
   const panel = document.createElement("section");
-  panel.className = "panel";
+  panel.className = "panel project-panel";
   panel.id = "panel-" + p.id;
   panel.role = "tabpanel";
   panel.setAttribute("aria-labelledby", "tab-" + p.id);
