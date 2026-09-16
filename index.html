@@ -743,14 +743,21 @@
   .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
 
   /* ---------- SIM Cards panel ---------- */
-  .simcards-list{ display:flex; flex-direction:column; gap:14px; }
-  .simcard-row{
+  .simcards-table-wrap{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
-    box-shadow:var(--shadow); padding:16px 18px;
+    box-shadow:var(--shadow); overflow-x:auto;
   }
-  .simcard-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
-  .simcard-title{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-  .simcard-name{ font-weight:700; font-size:14px; }
+  .simcards-table{ width:100%; border-collapse:collapse; font-size:12.5px; white-space:nowrap; }
+  .simcards-table th, .simcards-table td{ padding:12px 16px; text-align:left; }
+  .simcards-table thead th{
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--ink-3); border-bottom:1px solid var(--border);
+  }
+  .simcards-table tbody tr{ border-bottom:1px solid var(--border); }
+  .simcards-table tbody tr:last-child{ border-bottom:none; }
+  .simcards-table tbody tr:hover{ background:var(--surface-sunken); }
+  .simcards-table td:first-child{ white-space:normal; max-width:220px; }
+  .simcard-name{ font-weight:700; font-size:13px; }
   .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
@@ -2548,46 +2555,27 @@ function formatDataMb(mb){
   if (mb >= 1024) return (mb / 1024).toFixed(2) + " GB";
   return mb.toFixed(1) + " MB";
 }
+function formatDateWithYear(iso){
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 function buildSimCardRow(sim){
-  const row = document.createElement("div");
-  row.className = "simcard-row";
+  const row = document.createElement("tr");
   const suspended = !!sim.suspended_at;
   const pillClass = suspended ? "blocked" : (sim.network_status === "ACTIVE" ? "on-track" : "at-risk");
   const pillLabel = suspended ? "Suspended" : (sim.network_status || "Unknown");
   row.innerHTML = `
-    <div class="simcard-head">
-      <div class="simcard-title">
-        <span class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</span>
-        <span class="simcard-msisdn mono">${sim.msisdn || ""}</span>
-      </div>
-      <span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span>
-    </div>
-    <div class="status-facts">
-      <div>
-        <div class="fact-label">Data balance</div>
-        <div class="fact-value mono">${formatDataMb(sim.data_balance_mb)}</div>
-      </div>
-      <div>
-        <div class="fact-label">Avg usage / day</div>
-        <div class="fact-value mono">${formatDataMb(sim.avg_daily_usage_mb)}</div>
-      </div>
-      <div>
-        <div class="fact-label">Yesterday's usage</div>
-        <div class="fact-value mono">${formatDataMb(sim.yesterday_usage_mb)}</div>
-      </div>
-      <div>
-        <div class="fact-label">Expected data runout</div>
-        <div class="fact-value">${sim.expected_runout_date ? formatDate(sim.expected_runout_date) : "—"}</div>
-      </div>
-      <div>
-        <div class="fact-label">Last data recharge</div>
-        <div class="fact-value">${sim.last_recharge_date ? formatDate(sim.last_recharge_date) : "No recharge yet"}</div>
-      </div>
-      <div>
-        <div class="fact-label">One month after recharge</div>
-        <div class="fact-value">${sim.recharge_plus_one_month ? formatDate(sim.recharge_plus_one_month) : "—"}</div>
-      </div>
-    </div>
+    <td>
+      <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
+      <div class="simcard-msisdn mono">${sim.msisdn || ""}</div>
+    </td>
+    <td><span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span></td>
+    <td class="mono">${formatDataMb(sim.data_balance_mb)}</td>
+    <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
+    <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}</td>
+    <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}</td>
+    <td>${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}</td>
+    <td>${sim.recharge_plus_one_month ? formatDateWithYear(sim.recharge_plus_one_month) : "—"}</td>
   `;
   return row;
 }
@@ -2616,10 +2604,28 @@ async function renderSimCards(){
       emptyMsg.textContent = "No SIM cards found.";
       simcardsPanel.appendChild(emptyMsg);
     } else {
-      const list = document.createElement("div");
-      list.className = "simcards-list";
-      sims.forEach(sim => list.appendChild(buildSimCardRow(sim)));
-      simcardsPanel.appendChild(list);
+      const wrap = document.createElement("div");
+      wrap.className = "simcards-table-wrap";
+      wrap.innerHTML = `
+        <table class="simcards-table">
+          <thead>
+            <tr>
+              <th>SIM</th>
+              <th>Status</th>
+              <th>Data balance</th>
+              <th>Avg usage / day</th>
+              <th>Yesterday's usage</th>
+              <th>Expected data runout</th>
+              <th>Last data recharge</th>
+              <th>One month after recharge</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      const tbody = wrap.querySelector("tbody");
+      sims.forEach(sim => tbody.appendChild(buildSimCardRow(sim)));
+      simcardsPanel.appendChild(wrap);
     }
     document.getElementById("refreshSimCardsBtn").addEventListener("click", renderSimCards);
   } catch (e) {
