@@ -1268,6 +1268,7 @@ const personDateFilter = new Set();
 const companyFilter = new Set();
 const summaryProjectFilter = new Set();
 const summaryHealthFilter = new Set();
+const summaryPersonFilter = new Set();
 let projectNameQuery = "";
 function dateOffsetStr(offsetDays){
   const d = new Date(TODAY);
@@ -1312,6 +1313,7 @@ function saveFilterState(){
       personDate: Array.from(personDateFilter),
       project: Array.from(summaryProjectFilter),
       health: Array.from(summaryHealthFilter),
+      summaryPerson: Array.from(summaryPersonFilter),
       projectQuery: projectNameQuery,
     }));
   } catch (err) {}
@@ -1328,6 +1330,7 @@ function loadFilterState(){
     (parsed.personDate || []).forEach(v => personDateFilter.add(v));
     (parsed.project || []).forEach(id => summaryProjectFilter.add(id));
     (parsed.health || []).forEach(v => summaryHealthFilter.add(v));
+    (parsed.summaryPerson || []).forEach(name => summaryPersonFilter.add(name));
     projectNameQuery = parsed.projectQuery || "";
   } catch (err) {}
 }
@@ -1336,8 +1339,12 @@ function projectMatchesQuery(p){
   const q = projectNameQuery.trim().toLowerCase();
   return q === "" || p.name.toLowerCase().includes(q);
 }
+function projectHasFilteredPerson(p){
+  if (summaryPersonFilter.size === 0) return true;
+  return ACTIONS.some(a => a.projectIds.includes(p.id) && a.people.some(name => summaryPersonFilter.has(name)));
+}
 function visibleProjectsForFilters(){
-  return PROJECTS.filter(p => (summaryProjectFilter.size === 0 || summaryProjectFilter.has(p.id)) && (summaryHealthFilter.size === 0 || summaryHealthFilter.has(p.health)) && projectMatchesQuery(p));
+  return PROJECTS.filter(p => (summaryProjectFilter.size === 0 || summaryProjectFilter.has(p.id)) && (summaryHealthFilter.size === 0 || summaryHealthFilter.has(p.health)) && projectMatchesQuery(p) && projectHasFilteredPerson(p));
 }
 function setProjectNameQuery(value){
   projectNameQuery = value;
@@ -1394,6 +1401,12 @@ function toggleSummaryProjectFilter(value){
 }
 function toggleSummaryHealthFilter(value){
   if (summaryHealthFilter.has(value)) summaryHealthFilter.delete(value); else summaryHealthFilter.add(value);
+  saveFilterState();
+  renderRail();
+  renderSummary();
+}
+function toggleSummaryPersonFilter(value){
+  if (summaryPersonFilter.has(value)) summaryPersonFilter.delete(value); else summaryPersonFilter.add(value);
   saveFilterState();
   renderRail();
   renderSummary();
@@ -1900,7 +1913,7 @@ function renderRail(){
   rail.appendChild(divider);
 
   const visibleProjects = visibleProjectsForFilters();
-  const railFilterActive = summaryProjectFilter.size > 0 || projectNameQuery.trim() !== "";
+  const railFilterActive = summaryProjectFilter.size > 0 || summaryPersonFilter.size > 0 || projectNameQuery.trim() !== "";
 
   visibleProjects.forEach(p => rail.appendChild(buildTab(p)));
   if (railFilterActive && visibleProjects.length === 0){
@@ -2007,7 +2020,7 @@ function renderSummary(){
   const searchFocused = document.activeElement === searchEl;
   const searchSel = searchFocused ? [searchEl.selectionStart, searchEl.selectionEnd] : null;
 
-  const filtersActive = summaryProjectFilter.size > 0 || summaryHealthFilter.size > 0 || projectNameQuery.trim() !== "";
+  const filtersActive = summaryProjectFilter.size > 0 || summaryHealthFilter.size > 0 || summaryPersonFilter.size > 0 || projectNameQuery.trim() !== "";
   const visibleProjects = visibleProjectsForFilters();
 
   const total = visibleProjects.length;
@@ -2026,7 +2039,12 @@ function renderSummary(){
     <button type="button" class="filter-btn ${summaryProjectFilter.has(p.id) ? "active" : ""}" data-summary-filter="project" data-value="${p.id}">${p.name}</button>
   `).join("");
 
-  const chipsVisible = summaryFiltersExpanded || summaryProjectFilter.size > 0;
+  const summaryPersonChips = PEOPLE_ORDER.map(name => `
+    <button type="button" class="filter-btn ${summaryPersonFilter.has(name) ? "active" : ""}" data-summary-filter="person" data-value="${name}">${name}</button>
+  `).join("");
+
+  const summarySelectedCount = summaryProjectFilter.size + summaryPersonFilter.size;
+  const chipsVisible = summaryFiltersExpanded || summarySelectedCount > 0;
 
   summaryPanel.innerHTML = `
     <div class="summary-intro">
@@ -2038,15 +2056,19 @@ function renderSummary(){
         <span class="filter-label">Search by name</span>
         <input type="text" id="summaryProjectSearch" class="project-search-input" placeholder="Search projects by name…" autocomplete="off">
       </div>
-      <button type="button" class="filter-toggle" id="summaryFilterToggle" aria-expanded="${chipsVisible}">${chipsVisible ? "Hide project filters ▾" : "Show project filters ▸"}${summaryProjectFilter.size > 0 ? ` · ${summaryProjectFilter.size} selected` : ""}</button>
+      <button type="button" class="filter-toggle" id="summaryFilterToggle" aria-expanded="${chipsVisible}">${chipsVisible ? "Hide project filters ▾" : "Show project filters ▸"}${summarySelectedCount > 0 ? ` · ${summarySelectedCount} selected` : ""}</button>
       ${chipsVisible ? `
       <div class="filter-block">
         <span class="filter-label">Project</span>
         <div class="filter-group" role="group" aria-label="Filter by project (select any number)">${projectChips}</div>
+      </div>
+      <div class="filter-block">
+        <span class="filter-label">Person</span>
+        <div class="filter-group" role="group" aria-label="Filter by person — only show projects with actions assigned to them (select any number)">${summaryPersonChips}</div>
       </div>` : ""}
       ${filtersActive ? `<button type="button" class="filter-clear" id="clearSummaryFilters">Clear filters</button>` : ""}
     </div>
-    ${filtersActive ? `<p class="summary-filter-note">Showing ${total} of ${PROJECTS.length} projects${summaryProjectFilter.size > 0 && projectNameQuery.trim() !== "" ? " — matching both your search and the selected project filter" : ""} — drag-to-reorder is off while filtering.</p>` : ""}
+    ${filtersActive ? `<p class="summary-filter-note">Showing ${total} of ${PROJECTS.length} projects${(summaryProjectFilter.size > 0 || summaryPersonFilter.size > 0) && projectNameQuery.trim() !== "" ? " — matching both your search and the selected filters" : ""} — drag-to-reorder is off while filtering.</p>` : ""}
     <div class="summary-stats">
       <div class="stat-tile"><div class="stat-value mono">${total}</div><div class="stat-label">Projects</div></div>
       <div class="stat-tile"><div class="stat-value mono">${openTotal}</div><div class="stat-label">Open actions</div></div>
@@ -3895,6 +3917,7 @@ document.addEventListener("click", (e) => {
   const summaryFilterBtn = e.target.closest("[data-summary-filter]");
   if (summaryFilterBtn){
     if (summaryFilterBtn.dataset.summaryFilter === "health") toggleSummaryHealthFilter(summaryFilterBtn.dataset.value);
+    else if (summaryFilterBtn.dataset.summaryFilter === "person") toggleSummaryPersonFilter(summaryFilterBtn.dataset.value);
     else toggleSummaryProjectFilter(summaryFilterBtn.dataset.value);
     return;
   }
@@ -3906,6 +3929,7 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("#clearSummaryFilters")){
     summaryProjectFilter.clear();
     summaryHealthFilter.clear();
+    summaryPersonFilter.clear();
     projectNameQuery = "";
     saveFilterState();
     renderRail();
