@@ -726,7 +726,17 @@
   .activity-meta{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:4px; }
   .activity-who{ font-weight:600; font-size:12.5px; }
   .activity-when{ font-size:11px; color:var(--ink-3); white-space:nowrap; }
-  .activity-summary{ font-size:12.5px; color:var(--ink-2); }
+  .activity-summary{
+    display:flex; align-items:center; flex-wrap:wrap; gap:8px;
+    font-size:12.5px; color:var(--ink-2);
+  }
+  .activity-code-link{
+    font: inherit; font-size:12.5px; font-weight:600; color:var(--accent);
+    background:none; border:none; padding:0; cursor:pointer;
+  }
+  .activity-code-link:hover{ text-decoration:underline; }
+  .activity-code-link:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
+  .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -1857,7 +1867,7 @@ function describeItemChanges(before, after){
   return changes;
 }
 
-async function logActionChange(actionId, actionCode, changeType, summary){
+async function logActionChange(actionId, actionCode, changeType, summary, payload){
   if (!supabaseClient || !authSession) return;
   try {
     await supabaseClient.from("action_change_log").insert({
@@ -1866,6 +1876,7 @@ async function logActionChange(actionId, actionCode, changeType, summary){
       change_type: changeType,
       summary,
       changed_by: authSession.user.email,
+      payload: payload || null,
     });
   } catch (e) { /* best-effort — never block a save on logging failure */ }
 }
@@ -2436,16 +2447,26 @@ function formatChangeTimestamp(iso){
   const d = new Date(iso);
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+const activityEntriesById = new Map();
 function buildActivityRow(entry){
   const row = document.createElement("div");
   row.className = "activity-row";
-  const codeBit = entry.action_code ? `<span class="mono">${entry.action_code}</span> · ` : "";
+  const itemExists = !!findItemById(entry.action_id);
+  const codeBit = entry.action_code
+    ? (itemExists
+        ? `<button type="button" class="activity-code-link mono" data-open-item="${entry.action_id}" title="Open this action item">${entry.action_code}</button> · `
+        : `<span class="mono">${entry.action_code}</span> · `)
+    : "";
+  const canRestore = entry.change_type === "deleted" && !itemExists && entry.payload;
   row.innerHTML = `
     <div class="activity-meta">
       <span class="activity-who">${entry.changed_by}</span>
       <span class="activity-when">${formatChangeTimestamp(entry.created_at)}</span>
     </div>
-    <div class="activity-summary">${codeBit}${entry.summary}</div>
+    <div class="activity-summary">
+      <span>${codeBit}${entry.summary}</span>
+      ${canRestore ? `<button type="button" class="btn btn-new activity-restore-btn" data-restore-entry="${entry.id}" title="Bring this action item back">↺ Restore</button>` : ""}
+    </div>
   `;
   return row;
 }
@@ -2469,6 +2490,8 @@ async function renderActivity(){
     activityPanel.innerHTML = `<p class="summary-facts">No activity recorded yet.</p>`;
     return;
   }
+  activityEntriesById.clear();
+  data.forEach(entry => activityEntriesById.set(entry.id, entry));
   activityPanel.innerHTML = `
     <div class="summary-intro">
       <p>Who changed which action item, most recent first.</p>
@@ -3400,10 +3423,31 @@ function deleteItemModal(){
   const idx = ACTIONS.findIndex(a => a._id === editingItemId);
   if (idx !== -1) {
     const [removed] = ACTIONS.splice(idx, 1);
-    logActionChange(removed._id, removed.code, "deleted", "Deleted: " + removed.text);
+    logActionChange(removed._id, removed.code, "deleted", "Deleted: " + removed.text, removed);
   }
   closeItemModal();
   refreshAll();
+}
+
+function restoreDeletedItem(entry){
+  if (!entry.payload) return;
+  if (findItemById(entry.payload._id)){
+    alert("This action item already exists — nothing to restore.");
+    return;
+  }
+  const restored = {
+    _id: entry.payload._id,
+    code: entry.payload.code,
+    text: entry.payload.text,
+    date: entry.payload.date,
+    status: entry.payload.status,
+    people: [...(entry.payload.people || [])],
+    projectIds: (entry.payload.projectIds || []).filter(id => PROJECTS.some(p => p.id === id)),
+  };
+  ACTIONS.push(restored);
+  logActionChange(restored._id, restored.code, "restored", "Restored: " + restored.text);
+  refreshAll();
+  renderActivity();
 }
 
 document.getElementById("itemModalSave").addEventListener("click", saveItemModal);
@@ -4065,6 +4109,17 @@ document.addEventListener("click", (e) => {
   const newBtn = e.target.closest("[data-new-project]");
   if (newBtn){
     openItemModal({ projectId: newBtn.dataset.newProject || null });
+    return;
+  }
+  const openItemBtn = e.target.closest("[data-open-item]");
+  if (openItemBtn){
+    openItemModal({ id: Number(openItemBtn.dataset.openItem) });
+    return;
+  }
+  const restoreBtn = e.target.closest("[data-restore-entry]");
+  if (restoreBtn){
+    const entry = activityEntriesById.get(Number(restoreBtn.dataset.restoreEntry));
+    if (entry) restoreDeletedItem(entry);
     return;
   }
   const removeEmptyPersonBtn = e.target.closest("[data-remove-empty-person]");

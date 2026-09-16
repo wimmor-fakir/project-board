@@ -18,6 +18,11 @@ when you open the live site** — all one-time, no-code steps:
 2. **Run `supabase-activity-log.sql`** the same way — a second, separate
    script that creates the table behind the Activity tab (who changed
    what, and when).
+   - **Already ran this on a previous version of the site?** Also run
+     `supabase-migration-restore-deleted.sql` once — it adds the column
+     the Activity page's "Restore" button (for deleted action items)
+     needs. Safe to run even if you're not sure; it does nothing if
+     already applied.
 3. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.

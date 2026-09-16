@@ -6,10 +6,11 @@ create table if not exists action_change_log (
   id bigint generated always as identity primary key,
   action_id bigint not null,
   action_code text,
-  change_type text not null, -- 'created' | 'updated' | 'deleted'
+  change_type text not null, -- 'created' | 'updated' | 'deleted' | 'restored'
   summary text not null,
   changed_by text not null, -- the signed-in user's email
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  payload jsonb -- full action-item snapshot at the time of a 'deleted' entry, so it can be restored later
 );
 
 alter table action_change_log enable row level security;
