@@ -62,6 +62,11 @@ function addMonths(dateStr: string, months: number) {
   d.setUTCMonth(d.getUTCMonth() + months);
   return toDateStr(d);
 }
+function addDays(dateStr: string, days: number) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return toDateStr(d);
+}
 function daysBetween(startStr: string, endStr: string) {
   const start = new Date(startStr + "T00:00:00Z").getTime();
   const end = new Date(endStr + "T00:00:00Z").getTime();
@@ -154,12 +159,26 @@ Deno.serve(async (req) => {
       const balanceMb = num(sim.data_balance_in_mb);
       const yesterdayUsageMb = num((yesterdayUsage[msisdn] || {}).data_usage);
 
-      let expectedRunoutDate: string | null = null;
+      // Candidate 1: projecting the current balance forward at the average
+      // daily usage rate.
+      let balanceRunoutDate: string | null = null;
       if (avgDailyUsageMb > 0.001) {
         const daysLeft = Math.floor(balanceMb / avgDailyUsageMb);
         const d = new Date(today + "T00:00:00Z");
         d.setUTCDate(d.getUTCDate() + daysLeft);
-        expectedRunoutDate = toDateStr(d);
+        balanceRunoutDate = toDateStr(d);
+      }
+      // Candidate 2: the data bundle's own 30-day validity window from the
+      // last recharge (manual override, if set, otherwise SIMcontrol's own
+      // record of it) — data is lost at this point even if balance remains.
+      const bundleExpiryDate = lastRecharge ? addDays(lastRecharge, 30) : null;
+
+      // The SIM runs out of usable data at whichever of the two comes first.
+      let expectedRunoutDate: string | null;
+      if (balanceRunoutDate && bundleExpiryDate) {
+        expectedRunoutDate = balanceRunoutDate < bundleExpiryDate ? balanceRunoutDate : bundleExpiryDate;
+      } else {
+        expectedRunoutDate = balanceRunoutDate || bundleExpiryDate;
       }
 
       results.push({
