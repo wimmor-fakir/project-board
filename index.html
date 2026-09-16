@@ -809,7 +809,7 @@
   }
 </style>
 
-<div class="app">
+<div class="app" hidden>
   <nav class="rail" id="rail" role="tablist" aria-label="Projects">
     <div class="rail-header">
       <div class="rail-title">Project Board</div>
@@ -875,6 +875,7 @@
       <button class="modal-close" id="changePasswordClose" aria-label="Close" type="button">×</button>
     </div>
     <div class="modal-body">
+      <p class="field-hint" id="changePasswordHint" hidden>You've signed in with a temporary or invited password — set your own before continuing.</p>
       <label class="field">
         <span>New password</span>
         <input id="newPasswordField" type="password" autocomplete="new-password">
@@ -1472,7 +1473,11 @@ function setSaveStatus(state){
   if (sep) sep.hidden = !state;
 }
 
+function revealApp(){
+  document.querySelector(".app").hidden = false;
+}
 function showAuthGate(){
+  document.querySelector(".app").hidden = true;
   document.getElementById("authGateBackdrop").hidden = false;
   document.getElementById("signOutBtn").hidden = true;
   document.getElementById("changePasswordBtn").hidden = true;
@@ -1482,6 +1487,9 @@ function hideAuthGate(){
   document.getElementById("authError").hidden = true;
   document.getElementById("signOutBtn").hidden = false;
   document.getElementById("changePasswordBtn").hidden = false;
+}
+function needsPasswordChange(){
+  return !(authSession && authSession.user && authSession.user.user_metadata && authSession.user.user_metadata.password_changed);
 }
 
 async function loadBoardFromSupabase(){
@@ -1532,6 +1540,15 @@ function subscribeToBoardChanges(){
 
 async function startAfterSignIn(){
   hideAuthGate();
+  if (needsPasswordChange()){
+    openChangePasswordModal(true);
+    return;
+  }
+  await proceedIntoApp();
+}
+
+async function proceedIntoApp(){
+  revealApp();
   try {
     await loadBoardFromSupabase();
     subscribeToBoardChanges();
@@ -1564,14 +1581,21 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); signIn(); }
 });
 
-function openChangePasswordModal(){
+let forcedPasswordChange = false;
+function openChangePasswordModal(forced){
+  forcedPasswordChange = !!forced;
   document.getElementById("newPasswordField").value = "";
   document.getElementById("confirmPasswordField").value = "";
   document.getElementById("changePasswordError").hidden = true;
   document.getElementById("changePasswordBackdrop").hidden = false;
+  document.getElementById("changePasswordTitle").textContent = forcedPasswordChange ? "Set a new password" : "Change password";
+  document.getElementById("changePasswordHint").hidden = !forcedPasswordChange;
+  document.getElementById("changePasswordClose").hidden = forcedPasswordChange;
+  document.getElementById("changePasswordCancel").hidden = forcedPasswordChange;
   document.getElementById("newPasswordField").focus();
 }
 function closeChangePasswordModal(){
+  if (forcedPasswordChange) return; // must set a password before continuing
   document.getElementById("changePasswordBackdrop").hidden = true;
 }
 async function saveNewPassword(){
@@ -1589,13 +1613,20 @@ async function saveNewPassword(){
     errorEl.hidden = false;
     return;
   }
-  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  const { data, error } = await supabaseClient.auth.updateUser({
+    password: newPassword,
+    data: { password_changed: true },
+  });
   if (error){
     errorEl.textContent = error.message;
     errorEl.hidden = false;
     return;
   }
-  closeChangePasswordModal();
+  authSession = { ...authSession, user: data.user };
+  const wasForced = forcedPasswordChange;
+  forcedPasswordChange = false;
+  document.getElementById("changePasswordBackdrop").hidden = true;
+  if (wasForced) await proceedIntoApp();
 }
 document.getElementById("confirmPasswordField").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); saveNewPassword(); }
@@ -1604,9 +1635,14 @@ document.getElementById("confirmPasswordField").addEventListener("keydown", (e) 
 (async function initSupabase(){
   await Promise.resolve(); // defer past this script's synchronous top-level execution
   if (typeof window.supabase === "undefined") {
-    // Library failed to load (offline, blocked, etc.) — fall back to local-only mode.
-    backfillCodes();
-    refreshAll();
+    // Library failed to load (offline, blocked, etc.) — there's no way to verify
+    // who's asking, so show nothing rather than falling back to an open board.
+    document.getElementById("authGateBackdrop").hidden = false;
+    document.getElementById("authEmail").disabled = true;
+    document.getElementById("authPassword").disabled = true;
+    document.getElementById("authSignInBtn").disabled = true;
+    document.getElementById("authError").textContent = "Couldn't load the sign-in system — check your connection and reload the page.";
+    document.getElementById("authError").hidden = false;
     return;
   }
   supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1615,7 +1651,7 @@ document.getElementById("confirmPasswordField").addEventListener("keydown", (e) 
     await supabaseClient.auth.signOut();
   });
 
-  document.getElementById("changePasswordBtn").addEventListener("click", openChangePasswordModal);
+  document.getElementById("changePasswordBtn").addEventListener("click", () => openChangePasswordModal(false));
   document.getElementById("changePasswordCancel").addEventListener("click", closeChangePasswordModal);
   document.getElementById("changePasswordClose").addEventListener("click", closeChangePasswordModal);
   document.getElementById("changePasswordSave").addEventListener("click", saveNewPassword);
@@ -1630,14 +1666,18 @@ document.getElementById("confirmPasswordField").addEventListener("keydown", (e) 
     else showAuthGate();
   });
 
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  authSession = session;
-  if (authSession) {
-    await startAfterSignIn();
-  } else {
-    backfillCodes();
-    refreshAll();
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    authSession = session;
+    if (authSession) {
+      await startAfterSignIn();
+    } else {
+      showAuthGate();
+    }
+  } catch (e) {
     showAuthGate();
+    document.getElementById("authError").textContent = "Couldn't reach the sign-in system — check your connection and reload the page.";
+    document.getElementById("authError").hidden = false;
   }
 })();
 
