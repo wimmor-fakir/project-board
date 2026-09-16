@@ -115,6 +115,13 @@ Deno.serve(async (req) => {
       }
     }
 
+    // A manually-set date (from the SIM Cards page's "click to edit") always
+    // wins over whatever SIMcontrol's own API reports for that SIM.
+    const { data: overrideRows } = await adminClient.from("sim_recharge_overrides").select("msisdn, last_recharge_date");
+    (overrideRows || []).forEach((o: { msisdn: string; last_recharge_date: string }) => {
+      lastRechargeByMsisdn[o.msisdn] = o.last_recharge_date;
+    });
+
     // Usage-since-a-recharge-date needs its own call per distinct date;
     // cached so sims sharing a recharge date only trigger one request.
     const usageSinceCache: Record<string, Record<string, any>> = {};

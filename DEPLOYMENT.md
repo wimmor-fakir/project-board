@@ -302,13 +302,17 @@ never be embedded in the app's client-side code, since `index.html` is
 public. This Edge Function holds that key on Supabase's servers instead,
 where the browser never sees it.
 
-1. In your Supabase project, go to **Edge Functions** (left sidebar).
-2. Click **Deploy a new function** and name it exactly `sim-cards` (the
+1. Run `supabase-sim-recharge-overrides.sql` in Supabase's SQL Editor —
+   this creates the table behind the "click a last-recharge date to
+   edit it" feature on the SIM Cards page (a manually-set date always
+   wins over whatever, if anything, SIMcontrol's own API reports).
+2. In your Supabase project, go to **Edge Functions** (left sidebar).
+3. Click **Deploy a new function** and name it exactly `sim-cards` (the
    app calls it by this name).
-3. Open `supabase-edge-function/sim-cards.ts` from this project folder,
+4. Open `supabase-edge-function/sim-cards.ts` from this project folder,
    select all, copy it, and paste it into the function's code editor,
    replacing whatever template code is there. Click **Deploy**.
-4. Open the `sim-cards` function's **Secrets** settings and add one:
+5. Open the `sim-cards` function's **Secrets** settings and add one:
    `SIMCONTROL_API_KEY` = your SIMcontrol API key (find it in SIMcontrol
    under your account/API settings — it's the `X-API-Key` value, a
    string starting with `sc_`). If your Supabase plan doesn't expose a
@@ -316,8 +320,8 @@ where the browser never sees it.
    Functions → Manage secrets**, or via the
    [Supabase CLI](https://supabase.com/docs/guides/cli):
    `supabase secrets set SIMCONTROL_API_KEY=sc_...`
-5. Test it: sign in to your live site as `wim@hawktivity.com` — you
-   should see a **SIM Cards** tab in the rail with a card per SIM
+6. Test it: sign in to your live site as `wim@hawktivity.com` — you
+   should see a **SIM Cards** tab in the rail with a table of SIMs
    instead of an error.
 
 **Never paste the SIMcontrol API key into `index.html`, a commit, or
@@ -346,6 +350,7 @@ step 3 above to redeploy with the new value.
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
+| Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
 | Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
 
 ## Making future changes

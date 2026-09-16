@@ -759,6 +759,8 @@
   .simcards-table td:first-child{ white-space:normal; max-width:220px; }
   .simcard-name{ font-weight:700; font-size:13px; }
   .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
+  .simcard-recharge-editable{ cursor:pointer; }
+  .simcard-recharge-editable:hover{ text-decoration:underline; }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -2574,7 +2576,11 @@ function buildSimCardRow(sim){
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
     <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}</td>
     <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}</td>
-    <td>${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}</td>
+    <td>
+      <span class="simcard-recharge-editable" data-edit-sim-recharge="${sim.msisdn}" data-value="${sim.last_recharge_date || ""}" title="Click to set the last recharge date">
+        ${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}
+      </span>
+    </td>
     <td>${sim.recharge_plus_one_month ? formatDateWithYear(sim.recharge_plus_one_month) : "—"}</td>
   `;
   return row;
@@ -3345,6 +3351,44 @@ function openInlineDateEditor(dateEl, itemId){
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Escape"){ settled = true; rerenderCurrentView(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+
+async function saveSimRechargeOverride(msisdn, dateStr){
+  try {
+    await supabaseClient.from("sim_recharge_overrides").upsert({
+      msisdn,
+      last_recharge_date: dateStr,
+      updated_by: authSession.user.email,
+    });
+  } catch (e) { /* best-effort — renderSimCards will just show whatever comes back */ }
+}
+function openInlineSimRechargeEditor(el, msisdn){
+  const input = document.createElement("input");
+  input.type = "date";
+  input.className = "inline-date-input";
+  input.value = el.dataset.value || "";
+  el.replaceWith(input);
+  input.focus();
+  if (input.showPicker){
+    try { input.showPicker(); } catch (err) {}
+  }
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    if (input.value && input.value !== el.dataset.value){
+      await saveSimRechargeOverride(msisdn, input.value);
+    }
+    renderSimCards();
+  };
+  input.addEventListener("change", commit);
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderSimCards(); }
     else if (e.key === "Enter"){ commit(); }
   });
 }
@@ -4281,6 +4325,11 @@ document.addEventListener("click", (e) => {
   const editDateEl = e.target.closest("[data-edit-date]");
   if (editDateEl){
     openInlineDateEditor(editDateEl, Number(editDateEl.dataset.editDate));
+    return;
+  }
+  const editSimRechargeEl = e.target.closest("[data-edit-sim-recharge]");
+  if (editSimRechargeEl){
+    openInlineSimRechargeEditor(editSimRechargeEl, editSimRechargeEl.dataset.editSimRecharge);
     return;
   }
   const toggleStatusEl = e.target.closest("[data-toggle-status]");
