@@ -1262,20 +1262,54 @@ function actionFilterLabel(value){
 }
 
 const actionFilters = {};
+const dateFilters = {};
 const personFilter = new Set();
+const personDateFilter = new Set();
 const companyFilter = new Set();
 const summaryProjectFilter = new Set();
 const summaryHealthFilter = new Set();
 let projectNameQuery = "";
+function dateOffsetStr(offsetDays){
+  const d = new Date(TODAY);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+const NEXT_3_STR = dateOffsetStr(3);
+const NEXT_7_STR = dateOffsetStr(7);
+const DATE_FILTER_OPTIONS = [
+  { value: "overdue", label: "Overdue" },
+  { value: "today", label: "Today" },
+  { value: "next-3", label: "Next 3 days" },
+  { value: "next-7", label: "Next 7 days" },
+  { value: "future", label: "Future" },
+];
+function dateBucket(item){
+  if (actionStatusOption(item.status).isDone) return null;
+  if (item.date < TODAY_STR) return "overdue";
+  if (item.date === TODAY_STR) return "today";
+  if (item.date <= NEXT_3_STR) return "next-3";
+  if (item.date <= NEXT_7_STR) return "next-7";
+  return "future";
+}
+function matchesDateFilter(item, filterSet){
+  if (!filterSet || filterSet.size === 0) return true;
+  const bucket = dateBucket(item);
+  if (bucket === null) return false;
+  return filterSet.has(bucket);
+}
 const FILTER_STORAGE_KEY = "project-board-action-filters-v1";
 function saveFilterState(){
   try {
     const status = {};
     Object.keys(actionFilters).forEach(id => { if (actionFilters[id].size) status[id] = Array.from(actionFilters[id]); });
+    const when = {};
+    Object.keys(dateFilters).forEach(id => { if (dateFilters[id].size) when[id] = Array.from(dateFilters[id]); });
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
       status,
+      when,
       person: Array.from(personFilter),
       companyGlobal: Array.from(companyFilter),
+      personDate: Array.from(personDateFilter),
       project: Array.from(summaryProjectFilter),
       health: Array.from(summaryHealthFilter),
       projectQuery: projectNameQuery,
@@ -1288,8 +1322,10 @@ function loadFilterState(){
     if (!raw) return;
     const parsed = JSON.parse(raw);
     Object.keys(parsed.status || {}).forEach(id => { actionFilters[id] = new Set(parsed.status[id]); });
+    Object.keys(parsed.when || {}).forEach(id => { dateFilters[id] = new Set(parsed.when[id]); });
     (parsed.person || []).forEach(name => personFilter.add(name));
     (parsed.companyGlobal || parsed.company && Object.values(parsed.company).flat() || []).forEach(company => companyFilter.add(company));
+    (parsed.personDate || []).forEach(v => personDateFilter.add(v));
     (parsed.project || []).forEach(id => summaryProjectFilter.add(id));
     (parsed.health || []).forEach(v => summaryHealthFilter.add(v));
     projectNameQuery = parsed.projectQuery || "";
@@ -1319,6 +1355,21 @@ function toggleActionFilter(projectId, value){
   if (set.has(value)) set.delete(value); else set.add(value);
   saveFilterState();
   renderProjectPanels();
+  selectProject(currentId);
+}
+function toggleDateFilter(projectId, value){
+  if (!dateFilters[projectId]) dateFilters[projectId] = new Set();
+  const set = dateFilters[projectId];
+  if (set.has(value)) set.delete(value); else set.add(value);
+  saveFilterState();
+  renderProjectPanels();
+  selectProject(currentId);
+}
+function togglePersonDateFilter(value){
+  if (personDateFilter.has(value)) personDateFilter.delete(value); else personDateFilter.add(value);
+  saveFilterState();
+  renderProjectPanels();
+  renderByPerson();
   selectProject(currentId);
 }
 function toggleCompanyFilter(value){
@@ -2087,6 +2138,7 @@ function buildPersonGroupCard(person, filtersActive){
   card.className = "person-group pg-draggable" + (filtersActive ? " filter-locked" : "") + (collapsed ? " collapsed" : "");
   card.draggable = !filtersActive;
   card.dataset.name = person.name;
+  const displayItems = person.visibleItems || person.items;
   card.innerHTML = `
     <div class="person-head" data-toggle-person-group="${person.name}" title="Click to ${collapsed ? "expand" : "collapse"} task list">
       <span class="summary-grip" aria-hidden="true">⠿⠿</span>
@@ -2098,7 +2150,7 @@ function buildPersonGroupCard(person, filtersActive){
       <div class="person-tally">${person.openCount} open</div>
       <span class="collapse-chevron" aria-hidden="true">${collapsed ? "▸" : "▾"}</span>
     </div>
-    <div class="item-list">${person.items.map(item => buildPersonRow(item, person.name)).join("")}</div>
+    <div class="item-list">${displayItems.map(item => buildPersonRow(item, person.name)).join("")}</div>
   `;
   card.addEventListener("dragstart", () => card.classList.add("dragging"));
   card.addEventListener("dragend", () => {
@@ -2160,12 +2212,15 @@ function renderByPerson(){
   });
   people.sort((a, b) => personSortKey(a.name) - personSortKey(b.name));
 
-  const filtersActive = personFilter.size > 0 || companyFilter.size > 0;
-  const visiblePeople = people.filter(person => {
-    const personOk = personFilter.size === 0 || personFilter.has(person.name);
-    const companyOk = companyFilter.size === 0 || companyFilter.has(person.company || "No company");
-    return personOk && companyOk;
-  });
+  const filtersActive = personFilter.size > 0 || companyFilter.size > 0 || personDateFilter.size > 0;
+  const visiblePeople = people
+    .filter(person => {
+      const personOk = personFilter.size === 0 || personFilter.has(person.name);
+      const companyOk = companyFilter.size === 0 || companyFilter.has(person.company || "No company");
+      return personOk && companyOk;
+    })
+    .map(person => ({ ...person, visibleItems: person.items.filter(it => matchesDateFilter(it, personDateFilter)) }))
+    .filter(person => person.visibleItems.length > 0);
 
   const personChips = PEOPLE_ORDER.map(name => `
     <button type="button" class="filter-btn ${personFilter.has(name) ? "active" : ""}" data-person-filter data-value="${name}">${name}</button>
@@ -2174,6 +2229,10 @@ function renderByPerson(){
   const companies = Array.from(new Set(people.map(p => p.company || "No company"))).sort();
   const companyChips = companies.map(company => `
     <button type="button" class="filter-btn ${companyFilter.has(company) ? "active" : ""}" data-company-filter data-value="${company}">${company}</button>
+  `).join("");
+
+  const personDateChips = DATE_FILTER_OPTIONS.map(o => `
+    <button type="button" class="filter-btn ${personDateFilter.has(o.value) ? "active" : ""}" data-person-date-filter data-value="${o.value}">${o.label}</button>
   `).join("");
 
   const totalItemsByName = new Map();
@@ -2189,7 +2248,7 @@ function renderByPerson(){
     .sort((a, b) => personSortKey(a) - personSortKey(b));
 
   const chipsVisible = peopleFiltersExpanded || filtersActive;
-  const selectedCount = personFilter.size + companyFilter.size;
+  const selectedCount = personFilter.size + companyFilter.size + personDateFilter.size;
 
   peoplePanel.innerHTML = `
     <div class="summary-intro">
@@ -2206,6 +2265,10 @@ function renderByPerson(){
       <div class="filter-block">
         <span class="filter-label">Company</span>
         <div class="filter-group" role="group" aria-label="Filter by company (select any number)">${companyChips}</div>
+      </div>
+      <div class="filter-block">
+        <span class="filter-label">When</span>
+        <div class="filter-group" role="group" aria-label="Filter by due date (select any number)">${personDateChips}</div>
       </div>` : ""}
       ${filtersActive ? `<button type="button" class="filter-clear" id="clearPersonFilter">Clear filters</button>` : ""}
     </div>
@@ -2680,9 +2743,10 @@ function buildProjectPanel(p){
   panel.setAttribute("aria-labelledby", "tab-" + p.id);
 
   const filterSet = actionFilters[p.id] || new Set();
+  const dateFilterSet = dateFilters[p.id] || new Set();
   const companyFilterSet = companyFilter;
   const peopleFilterSet = personFilter;
-  const filtersActive = filterSet.size > 0 || companyFilterSet.size > 0 || peopleFilterSet.size > 0;
+  const filtersActive = filterSet.size > 0 || dateFilterSet.size > 0 || companyFilterSet.size > 0 || peopleFilterSet.size > 0;
   const orderedPeople = [...p.people].sort((a, b) => personSortKey(a.name) - personSortKey(b.name));
   const companies = Array.from(new Set(p.people.map(person => person.company || "No company"))).sort();
   const personGroups = orderedPeople.map(person => {
@@ -2691,7 +2755,7 @@ function buildProjectPanel(p){
     const personItems = ACTIONS.filter(a => a.projectIds.includes(p.id) && a.people.includes(person.name));
     const sorted = [...personItems].sort((a,b) => a.date.localeCompare(b.date));
     const openCount = sorted.filter(it => !actionStatusOption(it.status).isDone).length;
-    const visible = sorted.filter(it => matchesActionFilter(it, filterSet));
+    const visible = sorted.filter(it => matchesActionFilter(it, filterSet) && matchesDateFilter(it, dateFilterSet));
     if (visible.length === 0) return "";
     const rows = visible.map(item => {
       const display = actionDisplayStatus(item);
@@ -2758,6 +2822,14 @@ function buildProjectPanel(p){
             `).join("")}
           </div>
           ${filtersActive ? `<button type="button" class="filter-clear" data-filter-clear-project="${p.id}">Clear</button>` : ""}
+        </div>
+        <div class="action-filter-row">
+          <span class="filter-label">When</span>
+          <div class="filter-group" role="group" aria-label="Filter actions by due date (select any number)">
+            ${DATE_FILTER_OPTIONS.map(o => `
+              <button type="button" class="filter-btn ${dateFilterSet.has(o.value) ? "active" : ""}" data-date-filter-project="${p.id}" data-date-filter="${o.value}">${o.label}</button>
+            `).join("")}
+          </div>
         </div>
         ${orderedPeople.length > 0 ? `
         <div class="action-filter-row">
@@ -3850,6 +3922,11 @@ document.addEventListener("click", (e) => {
     toggleCompanyFilter(companyFilterBtn.dataset.value);
     return;
   }
+  const personDateFilterBtn = e.target.closest("[data-person-date-filter]");
+  if (personDateFilterBtn){
+    togglePersonDateFilter(personDateFilterBtn.dataset.value);
+    return;
+  }
   if (e.target.closest("#peopleFilterToggle")){
     peopleFiltersExpanded = !peopleFiltersExpanded;
     renderByPerson();
@@ -3858,6 +3935,7 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("#clearPersonFilter")){
     personFilter.clear();
     companyFilter.clear();
+    personDateFilter.clear();
     saveFilterState();
     renderByPerson();
     renderProjectPanels();
@@ -3867,6 +3945,11 @@ document.addEventListener("click", (e) => {
   const filterBtn = e.target.closest("[data-filter]");
   if (filterBtn){
     toggleActionFilter(filterBtn.dataset.filterProject, filterBtn.dataset.filter);
+    return;
+  }
+  const dateFilterBtn = e.target.closest("[data-date-filter]");
+  if (dateFilterBtn){
+    toggleDateFilter(dateFilterBtn.dataset.dateFilterProject, dateFilterBtn.dataset.dateFilter);
     return;
   }
   const filterPersonBtn = e.target.closest("[data-filter-person]");
@@ -3882,6 +3965,7 @@ document.addEventListener("click", (e) => {
   const filterClearBtn = e.target.closest("[data-filter-clear-project]");
   if (filterClearBtn){
     delete actionFilters[filterClearBtn.dataset.filterClearProject];
+    delete dateFilters[filterClearBtn.dataset.filterClearProject];
     companyFilter.clear();
     personFilter.clear();
     saveFilterState();
