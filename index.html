@@ -697,6 +697,10 @@
     background:none; width:9px; height:9px;
     border-left:2px solid var(--ink-3); border-bottom:2px solid var(--ink-3);
   }
+  .tab-dot.simcards-dot{
+    background:var(--ink-3); width:11px; height:9px; border-radius:2px;
+    clip-path: polygon(35% 0, 100% 0, 100% 100%, 0 100%, 0 35%);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -737,6 +741,17 @@
   .activity-code-link:hover{ text-decoration:underline; }
   .activity-code-link:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
   .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
+
+  /* ---------- SIM Cards panel ---------- */
+  .simcards-list{ display:flex; flex-direction:column; gap:14px; }
+  .simcard-row{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:16px 18px;
+  }
+  .simcard-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .simcard-title{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .simcard-name{ font-weight:700; font-size:14px; }
+  .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -1971,6 +1986,24 @@ function renderRail(){
   activityTab.addEventListener("click", () => selectProject("activity"));
   rail.appendChild(activityTab);
 
+  if (isAdmin()){
+    const simCardsTab = document.createElement("button");
+    simCardsTab.className = "tab";
+    simCardsTab.role = "tab";
+    simCardsTab.id = "tab-simcards";
+    simCardsTab.dataset.id = "simcards";
+    simCardsTab.setAttribute("aria-controls", "panel-simcards");
+    simCardsTab.innerHTML = `
+      <span class="tab-dot simcards-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">SIM Cards</div>
+        <div class="tab-meta">Data balance &amp; usage</div>
+      </span>
+    `;
+    simCardsTab.addEventListener("click", () => selectProject("simcards"));
+    rail.appendChild(simCardsTab);
+  }
+
   const divider = document.createElement("div");
   divider.className = "rail-divider";
   rail.appendChild(divider);
@@ -2410,6 +2443,13 @@ activityPanel.role = "tabpanel";
 activityPanel.setAttribute("aria-labelledby", "tab-activity");
 panelsEl.appendChild(activityPanel);
 
+const simcardsPanel = document.createElement("section");
+simcardsPanel.className = "panel";
+simcardsPanel.id = "panel-simcards";
+simcardsPanel.role = "tabpanel";
+simcardsPanel.setAttribute("aria-labelledby", "tab-simcards");
+panelsEl.appendChild(simcardsPanel);
+
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
 let settingsRenamingAction = null;
@@ -2501,6 +2541,90 @@ async function renderActivity(){
   list.className = "activity-list";
   data.forEach(entry => list.appendChild(buildActivityRow(entry)));
   activityPanel.appendChild(list);
+}
+
+function formatDataMb(mb){
+  if (mb === null || mb === undefined || isNaN(mb)) return "—";
+  if (mb >= 1024) return (mb / 1024).toFixed(2) + " GB";
+  return mb.toFixed(1) + " MB";
+}
+function buildSimCardRow(sim){
+  const row = document.createElement("div");
+  row.className = "simcard-row";
+  const suspended = !!sim.suspended_at;
+  const pillClass = suspended ? "blocked" : (sim.network_status === "ACTIVE" ? "on-track" : "at-risk");
+  const pillLabel = suspended ? "Suspended" : (sim.network_status || "Unknown");
+  row.innerHTML = `
+    <div class="simcard-head">
+      <div class="simcard-title">
+        <span class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</span>
+        <span class="simcard-msisdn mono">${sim.msisdn || ""}</span>
+      </div>
+      <span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span>
+    </div>
+    <div class="status-facts">
+      <div>
+        <div class="fact-label">Data balance</div>
+        <div class="fact-value mono">${formatDataMb(sim.data_balance_mb)}</div>
+      </div>
+      <div>
+        <div class="fact-label">Avg usage / day</div>
+        <div class="fact-value mono">${formatDataMb(sim.avg_daily_usage_mb)}</div>
+      </div>
+      <div>
+        <div class="fact-label">Yesterday's usage</div>
+        <div class="fact-value mono">${formatDataMb(sim.yesterday_usage_mb)}</div>
+      </div>
+      <div>
+        <div class="fact-label">Expected data runout</div>
+        <div class="fact-value">${sim.expected_runout_date ? formatDate(sim.expected_runout_date) : "—"}</div>
+      </div>
+      <div>
+        <div class="fact-label">Last data recharge</div>
+        <div class="fact-value">${sim.last_recharge_date ? formatDate(sim.last_recharge_date) : "No recharge yet"}</div>
+      </div>
+      <div>
+        <div class="fact-label">One month after recharge</div>
+        <div class="fact-value">${sim.recharge_plus_one_month ? formatDate(sim.recharge_plus_one_month) : "—"}</div>
+      </div>
+    </div>
+  `;
+  return row;
+}
+async function renderSimCards(){
+  if (!isAdmin()) return;
+  if (!supabaseClient || !authSession){
+    simcardsPanel.innerHTML = `<p class="summary-facts">Sign in to see SIM card data.</p>`;
+    return;
+  }
+  simcardsPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("sim-cards", { body: {} });
+    if (currentId !== "simcards") return; // user navigated away while this was loading
+    if (error) throw new Error(await describeFunctionError(error));
+    if (data && data.error) throw new Error(data.error);
+    const sims = (data && data.sims) || [];
+    simcardsPanel.innerHTML = `
+      <div class="summary-intro">
+        <p>Data balance and usage for each SIM card, from SIMcontrol.</p>
+        <button type="button" class="btn btn-new" id="refreshSimCardsBtn">↻ Refresh</button>
+      </div>
+    `;
+    if (!sims.length){
+      const emptyMsg = document.createElement("p");
+      emptyMsg.className = "summary-facts";
+      emptyMsg.textContent = "No SIM cards found.";
+      simcardsPanel.appendChild(emptyMsg);
+    } else {
+      const list = document.createElement("div");
+      list.className = "simcards-list";
+      sims.forEach(sim => list.appendChild(buildSimCardRow(sim)));
+      simcardsPanel.appendChild(list);
+    }
+    document.getElementById("refreshSimCardsBtn").addEventListener("click", renderSimCards);
+  } catch (e) {
+    simcardsPanel.innerHTML = `<p class="summary-facts">Couldn't load SIM cards: ${e.message} — has the sim-cards Edge Function been deployed, and is SIMCONTROL_API_KEY set?</p>`;
+  }
 }
 
 function renderSettings(){
@@ -2957,7 +3081,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -3012,6 +3136,10 @@ function selectProject(id){
     mainTitleEl.textContent = "Activity";
     document.getElementById("crumb").textContent = "Overview";
     renderActivity();
+  } else if (id === "simcards"){
+    mainTitleEl.textContent = "SIM Cards";
+    document.getElementById("crumb").textContent = "Overview";
+    renderSimCards();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);

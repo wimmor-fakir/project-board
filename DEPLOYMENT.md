@@ -288,6 +288,49 @@ repeat steps 4-5 above to redeploy with the new value.
 
 ---
 
+## Part 6 — Deploy the SIM Cards Edge Function
+
+The rail has an admin-only **SIM Cards** tab (only `wim@hawktivity.com`
+sees it) showing each SIM's data balance, average daily usage,
+yesterday's usage, expected data-runout date, and last recharge date —
+pulled live from your [SIMcontrol](https://app.simcontrol.co.za)
+account.
+
+**Why this needs a separate step:** reading this data requires your
+SIMcontrol API key, which — like the service_role key in Part 5 — must
+never be embedded in the app's client-side code, since `index.html` is
+public. This Edge Function holds that key on Supabase's servers instead,
+where the browser never sees it.
+
+1. In your Supabase project, go to **Edge Functions** (left sidebar).
+2. Click **Deploy a new function** and name it exactly `sim-cards` (the
+   app calls it by this name).
+3. Open `supabase-edge-function/sim-cards.ts` from this project folder,
+   select all, copy it, and paste it into the function's code editor,
+   replacing whatever template code is there. Click **Deploy**.
+4. Open the `sim-cards` function's **Secrets** settings and add one:
+   `SIMCONTROL_API_KEY` = your SIMcontrol API key (find it in SIMcontrol
+   under your account/API settings — it's the `X-API-Key` value, a
+   string starting with `sc_`). If your Supabase plan doesn't expose a
+   per-function secrets UI, set it project-wide instead: **Edge
+   Functions → Manage secrets**, or via the
+   [Supabase CLI](https://supabase.com/docs/guides/cli):
+   `supabase secrets set SIMCONTROL_API_KEY=sc_...`
+5. Test it: sign in to your live site as `wim@hawktivity.com` — you
+   should see a **SIM Cards** tab in the rail with a card per SIM
+   instead of an error.
+
+**Never paste the SIMcontrol API key into `index.html`, a commit, or
+anywhere else that ends up in the GitHub repo** — it belongs only in
+the Edge Function's secret settings, since that repo (and the live
+site's page source) is public.
+
+**If the admin account ever needs to change:** edit the `ADMIN_EMAIL`
+line near the top of `supabase-edge-function/sim-cards.ts`, then repeat
+step 3 above to redeploy with the new value.
+
+---
+
 ## Quick reference — what you have after this guide
 
 | Thing | Where |
@@ -303,6 +346,7 @@ repeat steps 4-5 above to redeploy with the new value.
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
+| Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
 
 ## Making future changes
 
