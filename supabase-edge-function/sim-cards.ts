@@ -67,14 +67,33 @@ function addDays(dateStr: string, days: number) {
   d.setUTCDate(d.getUTCDate() + days);
   return toDateStr(d);
 }
-function daysBetween(startStr: string, endStr: string) {
-  const start = new Date(startStr + "T00:00:00Z").getTime();
-  const end = new Date(endStr + "T00:00:00Z").getTime();
-  return Math.max(1, Math.round((end - start) / 86400000));
-}
 function num(v: unknown) {
   const n = parseFloat(String(v));
   return isNaN(n) ? 0 : n;
+}
+
+// Trimmed/IQR mean: the standard "outside 1.5x the interquartile range"
+// boxplot rule, so one freak high- or low-usage day doesn't skew the
+// average. With fewer than 4 points there's not enough data to tell a
+// real outlier from normal day-to-day variation, so just average them.
+function averageExcludingOutliers(values: number[]) {
+  if (values.length === 0) return 0;
+  if (values.length < 4) return values.reduce((a, b) => a + b, 0) / values.length;
+  const sorted = [...values].sort((a, b) => a - b);
+  const percentile = (p: number) => {
+    const idx = (sorted.length - 1) * p;
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+  };
+  const q1 = percentile(0.25);
+  const q3 = percentile(0.75);
+  const iqr = q3 - q1;
+  const lowerBound = q1 - 1.5 * iqr;
+  const upperBound = q3 + 1.5 * iqr;
+  const filtered = values.filter((v) => v >= lowerBound && v <= upperBound);
+  const pool = filtered.length > 0 ? filtered : values; // IQR bounds always contain Q1..Q3, so this is just a safety net
+  return pool.reduce((a, b) => a + b, 0) / pool.length;
 }
 
 Deno.serve(async (req) => {
@@ -99,11 +118,20 @@ Deno.serve(async (req) => {
     if (!apiKey) return jsonResponse({ error: "SIMCONTROL_API_KEY secret is not set for this function." }, 500);
 
     const today = toDateStr(new Date());
-    const yesterday = toDateStr(new Date(Date.now() - 86400000));
 
     const sims = await fetchAllPages("/sims", apiKey);
-    const lifetimeUsage = ((await simControlGet("/usage", apiKey)).data) || {};
-    const yesterdayUsage = ((await simControlGet(`/usage?start_date=${yesterday}&end_date=${yesterday}`, apiKey)).data) || {};
+
+    // Last 7 full days (yesterday back through 7 days ago) — one usage call
+    // per day, each covering every SIM at once. recentDays[0] is yesterday,
+    // which doubles as the "yesterday's usage" figure.
+    const recentDays: string[] = [];
+    for (let i = 1; i <= 7; i++) recentDays.push(toDateStr(new Date(Date.now() - i * 86400000)));
+    const usageByDate: Record<string, Record<string, any>> = {};
+    for (const day of recentDays) {
+      usageByDate[day] = ((await simControlGet(`/usage?start_date=${day}&end_date=${day}`, apiKey)).data) || {};
+    }
+    const yesterday = recentDays[0];
+
     // Wide window — this account may have no recharges yet, which is fine.
     const recharges = await fetchAllPages(`/recharge?start_date=2000-01-01&end_date=${today}`, apiKey);
 
@@ -127,37 +155,20 @@ Deno.serve(async (req) => {
       lastRechargeByMsisdn[o.msisdn] = o.last_recharge_date;
     });
 
-    // Usage-since-a-recharge-date needs its own call per distinct date;
-    // cached so sims sharing a recharge date only trigger one request.
-    const usageSinceCache: Record<string, Record<string, any>> = {};
-    async function usageSince(startDate: string) {
-      if (!usageSinceCache[startDate]) {
-        const body = await simControlGet(`/usage?start_date=${startDate}&end_date=${today}`, apiKey);
-        usageSinceCache[startDate] = body.data || {};
-      }
-      return usageSinceCache[startDate];
-    }
-
     const results = [];
     for (const sim of sims) {
       const msisdn = sim.msisdn;
       const lastRecharge = lastRechargeByMsisdn[msisdn] || null;
+      const simCreatedDate = toDateStr(new Date(sim.created));
 
-      let usageSinceStartMb: number;
-      let startDate: string;
-      if (lastRecharge) {
-        startDate = lastRecharge;
-        const usageMap = await usageSince(startDate);
-        usageSinceStartMb = num((usageMap[msisdn] || {}).data_usage);
-      } else {
-        startDate = toDateStr(new Date(sim.created));
-        usageSinceStartMb = num((lifetimeUsage[msisdn] || {}).data_usage);
-      }
+      // Only count days the SIM actually existed for.
+      const last7DaysUsage = recentDays
+        .filter((day) => day >= simCreatedDate)
+        .map((day) => num((usageByDate[day][msisdn] || {}).data_usage));
+      const avgDailyUsageMb = averageExcludingOutliers(last7DaysUsage);
 
-      const days = daysBetween(startDate, today);
-      const avgDailyUsageMb = usageSinceStartMb / days;
       const balanceMb = num(sim.data_balance_in_mb);
-      const yesterdayUsageMb = num((yesterdayUsage[msisdn] || {}).data_usage);
+      const yesterdayUsageMb = num((usageByDate[yesterday][msisdn] || {}).data_usage);
 
       // Candidate 1: projecting the current balance forward at the average
       // daily usage rate.
