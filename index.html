@@ -477,6 +477,7 @@
     color:var(--ink-2);
   }
   .item-date.overdue{ color:var(--danger); font-weight:600; }
+  .item-date.due-today{ color:var(--warning); font-weight:600; }
   .item-code{ font-size:10.5px; color:var(--ink-3); }
   .item-date, .item-status{ cursor:pointer; }
   .item-date:hover{ text-decoration:underline; }
@@ -1233,17 +1234,30 @@ function formatDate(iso){
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+const TODAY_STR = TODAY.toISOString().slice(0, 10);
 function isOverdue(item){
   if (actionStatusOption(item.status).isDone) return false;
-  const d = new Date(item.date + "T00:00:00");
-  return d < TODAY;
+  return item.date < TODAY_STR;
 }
-function statusLabel(item, overdue){
-  if (overdue) return "Overdue";
-  return actionStatusOption(item.status).label;
+function isDueToday(item){
+  if (actionStatusOption(item.status).isDone) return false;
+  return item.date === TODAY_STR;
+}
+function actionDisplayStatus(item){
+  if (isOverdue(item)) return { label: "Overdue", color: "var(--danger)", soft: "var(--danger-soft)", dateClass: "overdue" };
+  if (isDueToday(item)) return { label: "Due Today", color: "var(--warning)", soft: "var(--warning-soft)", dateClass: "due-today" };
+  const opt = actionStatusOption(item.status);
+  return { label: opt.label, color: opt.color, soft: opt.soft, dateClass: "" };
+}
+function actionFilterBucket(item){
+  if (isOverdue(item)) return "overdue";
+  if (isDueToday(item)) return "due-today";
+  return item.status;
 }
 function actionFilterLabel(value){
-  return value === "overdue" ? "Overdue" : actionStatusOption(value).label;
+  if (value === "overdue") return "Overdue";
+  if (value === "due-today") return "Due Today";
+  return actionStatusOption(value).label;
 }
 
 const actionFilters = {};
@@ -1296,8 +1310,7 @@ function setProjectNameQuery(value){
 }
 function matchesActionFilter(item, filterSet){
   if (!filterSet || filterSet.size === 0) return true;
-  const bucket = isOverdue(item) ? "overdue" : item.status;
-  return filterSet.has(bucket);
+  return filterSet.has(actionFilterBucket(item));
 }
 function toggleActionFilter(projectId, value){
   if (!actionFilters[projectId]) actionFilters[projectId] = new Set();
@@ -2016,18 +2029,15 @@ summaryPanel.setAttribute("aria-labelledby", "tab-summary");
 panelsEl.appendChild(summaryPanel);
 
 function buildPersonRow(item, forPerson){
-  const overdue = isOverdue(item);
-  const label = statusLabel(item, overdue);
+  const display = actionDisplayStatus(item);
   const statusOpt = actionStatusOption(item.status);
-  const pillColor = overdue ? "var(--danger)" : statusOpt.color;
-  const pillSoft = overdue ? "var(--danger-soft)" : statusOpt.soft;
   const tagsHtml = item.projectTags.map(t => `<span class="project-tag"><span class="tag-dot" style="background:${healthOption(t.health).color}"></span>${t.name}</span>`).join("");
   const otherPeople = item.people.filter(n => n !== forPerson);
   return `
     <div class="item" data-item-id="${item._id}" tabindex="0" role="button">
       <div class="item-meta">
-        <div class="item-date ${overdue ? "overdue" : ""}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
-        <div class="item-status" style="color:${pillColor}; background:${pillSoft}" data-toggle-status="${item._id}" title="Click to change status">${label}</div>
+        <div class="item-date ${display.dateClass}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
+        <div class="item-status" style="color:${display.color}; background:${display.soft}" data-toggle-status="${item._id}" title="Click to change status">${display.label}</div>
         ${item.code ? `<div class="item-code mono">${item.code}</div>` : ""}
       </div>
       <div class="item-text-wrap">
@@ -2683,11 +2693,8 @@ function buildProjectPanel(p){
     const visible = sorted.filter(it => matchesActionFilter(it, filterSet));
     if (visible.length === 0) return "";
     const rows = visible.map(item => {
-      const overdue = isOverdue(item);
-      const label = statusLabel(item, overdue);
+      const display = actionDisplayStatus(item);
       const statusOpt = actionStatusOption(item.status);
-      const pillColor = overdue ? "var(--danger)" : statusOpt.color;
-      const pillSoft = overdue ? "var(--danger-soft)" : statusOpt.soft;
       const otherPeople = item.people.filter(n => n !== person.name);
       const otherProjects = item.projectIds.filter(id => id !== p.id).map(id => (PROJECTS.find(pr => pr.id === id) || {}).name).filter(Boolean);
       const extraBits = [];
@@ -2696,8 +2703,8 @@ function buildProjectPanel(p){
       return `
         <div class="item" data-item-id="${item._id}" tabindex="0" role="button">
           <div class="item-meta">
-            <div class="item-date ${overdue ? "overdue" : ""}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
-            <div class="item-status" style="color:${pillColor}; background:${pillSoft}" data-toggle-status="${item._id}" title="Click to change status">${label}</div>
+            <div class="item-date ${display.dateClass}" data-edit-date="${item._id}" title="Click to change date">${formatDate(item.date)}</div>
+            <div class="item-status" style="color:${display.color}; background:${display.soft}" data-toggle-status="${item._id}" title="Click to change status">${display.label}</div>
             ${item.code ? `<div class="item-code mono">${item.code}</div>` : ""}
           </div>
           <div class="item-text-wrap">
@@ -2745,7 +2752,7 @@ function buildProjectPanel(p){
         <div class="action-filter-row">
           <span class="filter-label">Show</span>
           <div class="filter-group" role="group" aria-label="Filter actions by status (select any number)">
-            ${[...ACTION_STATUS_OPTIONS.map(o => o.value), "overdue"].map(f => `
+            ${[...ACTION_STATUS_OPTIONS.map(o => o.value), "overdue", "due-today"].map(f => `
               <button type="button" class="filter-btn ${filterSet.has(f) ? "active" : ""}" data-filter-project="${p.id}" data-filter="${f}">${actionFilterLabel(f)}</button>
             `).join("")}
           </div>
