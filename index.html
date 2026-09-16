@@ -350,6 +350,23 @@
 
   /* ---------- Action list ---------- */
   .action-panel{ display:flex; flex-direction:column; gap:14px; }
+  .action-items-scroll{
+    display:flex; flex-direction:column; gap:14px;
+    max-height:calc(100vh - 280px);
+    min-height:160px;
+    overflow-y:auto;
+    padding-right:6px;
+    scrollbar-width:thin;
+    scrollbar-color:var(--border-strong) transparent;
+  }
+  .action-items-scroll > *{ flex-shrink:0; }
+  .action-items-scroll::-webkit-scrollbar{ width:8px; }
+  .action-items-scroll::-webkit-scrollbar-track{ background:transparent; }
+  .action-items-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .action-items-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
+  @media (max-width: 900px){
+    .action-items-scroll{ max-height:none; overflow-y:visible; }
+  }
   .action-toolbar{
     display:flex; align-items:center; justify-content:space-between;
     padding:0 2px;
@@ -547,6 +564,12 @@
   }
   .btn-new:hover{ background:var(--accent-soft-border); }
   .btn-danger{ background:var(--danger); color:#fff; }
+  .btn-clear-filters{
+    background:var(--accent); color:var(--accent-ink); border-color:var(--accent);
+    font-size:12.5px; font-weight:700; padding:7px 14px;
+  }
+  .btn-clear-filters:hover{ filter:brightness(1.1); }
+  .btn-clear-filters:active{ filter:brightness(0.94); }
   .btn-danger:hover:not(:disabled){ filter:brightness(1.08); }
   .btn-danger:disabled{ opacity:.45; cursor:not-allowed; }
   .delete-warning{ font-size:13px; color:var(--ink-2); line-height:1.55; }
@@ -699,6 +722,7 @@
   .filter-block{ display:flex; flex-direction:column; gap:7px; }
   .filter-block .filter-group{ flex-wrap:wrap; }
   .filter-panel .filter-clear{ align-self:flex-start; }
+  .filter-panel .btn-clear-filters{ align-self:flex-start; }
   .filter-toggle{
     font: inherit; font-size:12.5px; font-weight:600; color:var(--ink-2);
     background:var(--surface-sunken); border:1px solid var(--border); border-radius:7px;
@@ -2066,7 +2090,7 @@ function renderSummary(){
         <span class="filter-label">Person</span>
         <div class="filter-group" role="group" aria-label="Filter by person — only show projects with actions assigned to them (select any number)">${summaryPersonChips}</div>
       </div>` : ""}
-      ${filtersActive ? `<button type="button" class="filter-clear" id="clearSummaryFilters">Clear filters</button>` : ""}
+      ${filtersActive ? `<button type="button" class="btn btn-clear-filters" id="clearSummaryFilters">✕ Clear filters</button>` : ""}
     </div>
     ${filtersActive ? `<p class="summary-filter-note">Showing ${total} of ${PROJECTS.length} projects${(summaryProjectFilter.size > 0 || summaryPersonFilter.size > 0) && projectNameQuery.trim() !== "" ? " — matching both your search and the selected filters" : ""} — drag-to-reorder is off while filtering.</p>` : ""}
     <div class="summary-stats">
@@ -2292,7 +2316,7 @@ function renderByPerson(){
         <span class="filter-label">When</span>
         <div class="filter-group" role="group" aria-label="Filter by due date (select any number)">${personDateChips}</div>
       </div>` : ""}
-      ${filtersActive ? `<button type="button" class="filter-clear" id="clearPersonFilter">Clear filters</button>` : ""}
+      ${filtersActive ? `<button type="button" class="btn btn-clear-filters" id="clearPersonFilter">✕ Clear filters</button>` : ""}
     </div>
     ${filtersActive ? `<p class="summary-filter-note">Showing ${visiblePeople.length} of ${people.length} people — drag-to-reorder is off while filtering.</p>` : ""}
   `;
@@ -2843,7 +2867,7 @@ function buildProjectPanel(p){
               <button type="button" class="filter-btn ${filterSet.has(f) ? "active" : ""}" data-filter-project="${p.id}" data-filter="${f}">${actionFilterLabel(f)}</button>
             `).join("")}
           </div>
-          ${filtersActive ? `<button type="button" class="filter-clear" data-filter-clear-project="${p.id}">Clear</button>` : ""}
+          ${filtersActive ? `<button type="button" class="btn btn-clear-filters" data-filter-clear-project="${p.id}">✕ Clear</button>` : ""}
         </div>
         <div class="action-filter-row">
           <span class="filter-label">When</span>
@@ -2871,7 +2895,9 @@ function buildProjectPanel(p){
             `).join("")}
           </div>
         </div>` : ""}
-        ${personGroups || `<p class="summary-facts">${emptyMessage}</p>`}
+        <div class="action-items-scroll">
+          ${personGroups || `<p class="summary-facts">${emptyMessage}</p>`}
+        </div>
       </div>
     </div>
   `;
