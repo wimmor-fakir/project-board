@@ -562,10 +562,6 @@
   .project-tag .tag-dot.at-risk{ background:var(--warning); }
   .project-tag .tag-dot.blocked{ background:var(--danger); }
 
-  .data-note{
-    font-size:11px; color:var(--ink-3); text-align:right; margin-top:4px;
-  }
-
   .save-status{ font-size:11px; }
   .save-status.saving{ color:var(--ink-3); }
   .save-status.saved{ color:var(--success); }
@@ -752,7 +748,11 @@
   .simcards-table thead th{
     font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
     color:var(--ink-3); border-bottom:1px solid var(--border);
+    cursor:pointer; user-select:none;
   }
+  .simcards-table thead th:hover{ color:var(--ink); }
+  .simcards-table thead th.sorted{ color:var(--accent); }
+  .simcards-table .sort-arrow{ font-size:9px; margin-left:4px; }
   .simcards-table tbody tr{ border-bottom:1px solid var(--border); }
   .simcards-table tbody tr:last-child{ border-bottom:none; }
   .simcards-table tbody tr:hover{ background:var(--surface-sunken); }
@@ -926,7 +926,6 @@
     </div>
 
     <div class="panels" id="panels"></div>
-    <div class="data-note">Rainbow Chicken reflects real project detail; the other projects are example data — replace them with your own.</div>
   </main>
 </div>
 
@@ -2581,9 +2580,60 @@ function buildSimCardRow(sim){
         ${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}
       </span>
     </td>
-    <td>${sim.recharge_plus_one_month ? formatDateWithYear(sim.recharge_plus_one_month) : "—"}</td>
   `;
   return row;
+}
+
+const SIMCARD_COLUMNS = [
+  { key: "name", label: "SIM", sortValue: sim => (sim.description || sim.msisdn || "").toLowerCase() },
+  { key: "status", label: "Status", sortValue: sim => sim.suspended_at ? "" : (sim.network_status || "") },
+  { key: "balance", label: "Data balance", sortValue: sim => sim.data_balance_mb || 0 },
+  { key: "avg", label: "Avg usage / day", sortValue: sim => sim.avg_daily_usage_mb || 0 },
+  { key: "yesterday", label: "Yesterday's usage", sortValue: sim => sim.yesterday_usage_mb || 0 },
+  { key: "runout", label: "Expected data runout", sortValue: sim => sim.expected_runout_date || "" },
+  { key: "recharge", label: "Last data recharge", sortValue: sim => sim.last_recharge_date || "" },
+];
+let simCardsData = [];
+let simCardsSortKey = "name";
+let simCardsSortDir = 1;
+
+function sortedSimCards(){
+  const col = SIMCARD_COLUMNS.find(c => c.key === simCardsSortKey) || SIMCARD_COLUMNS[0];
+  return [...simCardsData].sort((a, b) => {
+    const av = col.sortValue(a);
+    const bv = col.sortValue(b);
+    if (av < bv) return -1 * simCardsSortDir;
+    if (av > bv) return 1 * simCardsSortDir;
+    return 0;
+  });
+}
+function buildSimCardsTable(){
+  const wrap = document.createElement("div");
+  wrap.className = "simcards-table-wrap";
+  const headerHtml = SIMCARD_COLUMNS.map(col => {
+    const active = simCardsSortKey === col.key;
+    const arrow = active ? `<span class="sort-arrow">${simCardsSortDir === 1 ? "▲" : "▼"}</span>` : "";
+    return `<th data-sort-key="${col.key}" class="${active ? "sorted" : ""}" title="Click to sort">${col.label}${arrow}</th>`;
+  }).join("");
+  wrap.innerHTML = `
+    <table class="simcards-table">
+      <thead><tr>${headerHtml}</tr></thead>
+      <tbody></tbody>
+    </table>
+  `;
+  const tbody = wrap.querySelector("tbody");
+  sortedSimCards().forEach(sim => tbody.appendChild(buildSimCardRow(sim)));
+  return wrap;
+}
+function renderSimCardsTableOnly(){
+  const existingWrap = simcardsPanel.querySelector(".simcards-table-wrap");
+  if (!existingWrap) return;
+  existingWrap.replaceWith(buildSimCardsTable());
+}
+function toggleSimCardsSort(key){
+  if (simCardsSortKey === key) simCardsSortDir = -simCardsSortDir;
+  else { simCardsSortKey = key; simCardsSortDir = 1; }
+  renderSimCardsTableOnly();
 }
 async function renderSimCards(){
   if (!isAdmin()) return;
@@ -2597,41 +2647,20 @@ async function renderSimCards(){
     if (currentId !== "simcards") return; // user navigated away while this was loading
     if (error) throw new Error(await describeFunctionError(error));
     if (data && data.error) throw new Error(data.error);
-    const sims = (data && data.sims) || [];
+    simCardsData = (data && data.sims) || [];
     simcardsPanel.innerHTML = `
       <div class="summary-intro">
         <p>Data balance and usage for each SIM card, from SIMcontrol.</p>
         <button type="button" class="btn btn-new" id="refreshSimCardsBtn">↻ Refresh</button>
       </div>
     `;
-    if (!sims.length){
+    if (!simCardsData.length){
       const emptyMsg = document.createElement("p");
       emptyMsg.className = "summary-facts";
       emptyMsg.textContent = "No SIM cards found.";
       simcardsPanel.appendChild(emptyMsg);
     } else {
-      const wrap = document.createElement("div");
-      wrap.className = "simcards-table-wrap";
-      wrap.innerHTML = `
-        <table class="simcards-table">
-          <thead>
-            <tr>
-              <th>SIM</th>
-              <th>Status</th>
-              <th>Data balance</th>
-              <th>Avg usage / day</th>
-              <th>Yesterday's usage</th>
-              <th>Expected data runout</th>
-              <th>Last data recharge</th>
-              <th>One month after recharge</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      `;
-      const tbody = wrap.querySelector("tbody");
-      sims.forEach(sim => tbody.appendChild(buildSimCardRow(sim)));
-      simcardsPanel.appendChild(wrap);
+      simcardsPanel.appendChild(buildSimCardsTable());
     }
     document.getElementById("refreshSimCardsBtn").addEventListener("click", renderSimCards);
   } catch (e) {
@@ -4330,6 +4359,11 @@ document.addEventListener("click", (e) => {
   const editSimRechargeEl = e.target.closest("[data-edit-sim-recharge]");
   if (editSimRechargeEl){
     openInlineSimRechargeEditor(editSimRechargeEl, editSimRechargeEl.dataset.editSimRecharge);
+    return;
+  }
+  const sortSimCardsEl = e.target.closest("[data-sort-key]");
+  if (sortSimCardsEl){
+    toggleSimCardsSort(sortSimCardsEl.dataset.sortKey);
     return;
   }
   const toggleStatusEl = e.target.closest("[data-toggle-status]");

@@ -57,11 +57,6 @@ async function fetchAllPages(path: string, apiKey: string) {
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
 }
-function addMonths(dateStr: string, months: number) {
-  const d = new Date(dateStr + "T00:00:00Z");
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return toDateStr(d);
-}
 function addDays(dateStr: string, days: number) {
   const d = new Date(dateStr + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + days);
@@ -204,7 +199,6 @@ Deno.serve(async (req) => {
         yesterday_usage_mb: yesterdayUsageMb,
         expected_runout_date: expectedRunoutDate,
         last_recharge_date: lastRecharge,
-        recharge_plus_one_month: lastRecharge ? addMonths(lastRecharge, 1) : null,
         created: sim.created,
       });
     }
