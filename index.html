@@ -772,12 +772,22 @@
     box-shadow:var(--shadow); padding:14px 16px; margin-bottom:14px;
   }
   .team-update-fields{
-    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
-    align-items:end; gap:14px 18px; width:100%;
+    display:grid; grid-template-columns:repeat(4, 1fr);
+    gap:6px 18px; width:100%;
   }
-  .team-update-compose .field{ width:100%; }
-  .team-update-compose .field input{ width:100%; }
+  .tu-field-label{ font-size:12px; font-weight:600; color:var(--ink-2); align-self:start; }
+  .tu-field-input{
+    font: inherit; font-size:13px; font-weight:400; color:var(--ink); width:100%;
+    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
+    padding:8px 10px; align-self:start;
+  }
+  .tu-field-input:focus{ outline:2px solid var(--focus); outline-offset:1px; background:var(--surface); }
   .field-note{ font-weight:400; color:var(--ink-3); }
+  @media (max-width: 900px){
+    .team-update-fields{ display:flex; flex-direction:column; gap:5px; }
+    .tu-field-label{ margin-top:10px; }
+    .tu-field-label:first-of-type{ margin-top:0; }
+  }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -2967,11 +2977,11 @@ async function renderTeamUpdates(){
     </div>
     <div class="team-update-compose">
       <div class="team-update-fields">
-        ${TEAM_UPDATE_QUESTIONS.map(q => `
-          <label class="field">
-            <span>${q.label}${q.note ? ` <span class="field-note">(${q.note})</span>` : ""}</span>
-            <input type="text" id="tu_${q.key}" placeholder="${q.placeholder}" autocomplete="off">
-          </label>
+        ${TEAM_UPDATE_QUESTIONS.map((q, i) => `
+          <label class="tu-field-label" for="tu_${q.key}" style="grid-column:${i + 1}; grid-row:1; order:${i * 2};">${q.label}${q.note ? ` <span class="field-note">(${q.note})</span>` : ""}</label>
+        `).join("")}
+        ${TEAM_UPDATE_QUESTIONS.map((q, i) => `
+          <input type="text" class="tu-field-input" id="tu_${q.key}" placeholder="${q.placeholder}" autocomplete="off" style="grid-column:${i + 1}; grid-row:2; order:${i * 2 + 1};">
         `).join("")}
       </div>
       <div class="modal-error" id="teamUpdateError" hidden></div>
