@@ -8,7 +8,7 @@ C: drive and hosting it as a real website, with Supabase as the database.
 `index.html` now talks to Supabase directly (instead of Claude's Artifact
 database), requires sign-in before showing the board (matching the access
 decision in Part 4), and logs who changes each action item to an
-Activity tab. **Three things still need doing before it actually works
+Activity tab. **Four things still need doing before it actually works
 when you open the live site** — all one-time, no-code steps:
 
 1. **Run `supabase-setup.sql`** — open it, copy its contents, paste into
@@ -23,17 +23,20 @@ when you open the live site** — all one-time, no-code steps:
      the Activity page's "Restore" button (for deleted action items)
      needs. Safe to run even if you're not sure; it does nothing if
      already applied.
-3. **Create at least one user account for yourself** — see Part 4 below
+3. **Run `supabase-team-updates.sql`** too — creates the table behind the
+   Team Update page.
+4. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
-4. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
+5. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
    powers the Settings page's "User management" section (invite/remove
-   people); everything else works without it.
+   people, and who can see Settings/Activity/SIM Cards/Team Update);
+   everything else works without it.
 
-Once the first three are done, push the code (see Part 1) and the live
+Once the first four are done, push the code (see Part 1) and the live
 site will save, sync, and log activity for real, for anyone you've
 created an account for. Part 5 (Edge Function) is separate and only
-needed for in-app invite/remove.
+needed for in-app invite/remove/page-access.
 
 ---
 
@@ -245,13 +248,13 @@ only if a specific need for something more restrictive comes up.
 
 The Settings page has an admin-only "User management" section (invite
 people by email, remove accounts, and tick which of the Settings,
-Activity, and SIM Cards pages each person can see). It only works for
-the account whose email matches `ADMIN_EMAIL` in
+Activity, SIM Cards, and Team Update pages each person can see). It
+only works for the account whose email matches `ADMIN_EMAIL` in
 `supabase-edge-function/manage-users.ts` (currently
 `wim@hawktivity.com`) — everyone else won't even see that section.
-By default, nobody but the admin can see the Settings, Activity, or
-SIM Cards pages at all — that's controlled by the checkboxes in this
-section, one tick per person per page.
+By default, nobody but the admin can see any of those four pages —
+that's controlled by the checkboxes in this section, one tick per
+person per page.
 
 **Why this needs a separate step:** inviting and deleting users requires
 Supabase's admin API, which only works with the `service_role` key — an
@@ -275,11 +278,12 @@ still letting the app call it safely over the internet.
    **Settings**, and you should see "User management" at the bottom with
    a list of current users instead of an error.
 
-**Already had this function deployed before per-page access existed?**
-Re-copy `supabase-edge-function/manage-users.ts` into it and redeploy
-(steps 4-5 above) to pick up the checkboxes. One consequence worth
-knowing: the moment this redeploys, everyone except the admin loses
-access to Settings, Activity, and SIM Cards until you re-tick the
+**Already had this function deployed before per-page access existed
+(or before Team Update was added)?** Re-copy
+`supabase-edge-function/manage-users.ts` into it and redeploy (steps
+4-5 above) to pick up the checkboxes. One consequence worth knowing:
+the moment this redeploys, everyone except the admin loses access to
+Settings, Activity, SIM Cards, and Team Update until you re-tick the
 pages they should keep seeing — nothing else about their account
 changes.
 
@@ -360,6 +364,7 @@ step 3 above to redeploy with the new value.
 |---|---|
 | Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
+| Run `supabase-team-updates.sql` too | Creates the table behind the Team Update page |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |

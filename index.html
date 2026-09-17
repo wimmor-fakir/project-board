@@ -697,6 +697,11 @@
     background:var(--ink-3); width:11px; height:9px; border-radius:2px;
     clip-path: polygon(35% 0, 100% 0, 100% 100%, 0 100%, 0 35%);
   }
+  .tab-dot.teamupdate-dot{
+    background:none; width:0; height:0;
+    border-top:5px solid transparent; border-bottom:5px solid transparent;
+    border-left:9px solid var(--ink-3);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -756,6 +761,18 @@
   .activity-code-link:hover{ text-decoration:underline; }
   .activity-code-link:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
   .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
+  .team-update-text{ font-size:13px; color:var(--ink); line-height:1.5; white-space:pre-wrap; }
+  .team-update-compose{
+    display:flex; flex-direction:column; gap:8px; align-items:flex-start;
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:14px 16px; margin-bottom:14px;
+  }
+  .team-update-compose textarea{
+    font: inherit; font-size:13px; color:var(--ink); width:100%;
+    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
+    padding:9px 11px; resize:vertical;
+  }
+  .team-update-compose textarea:focus{ outline:2px solid var(--focus); outline-offset:1px; }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -1543,6 +1560,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "settings", label: "Settings" },
   { key: "activity", label: "Activity" },
   { key: "simcards", label: "SIM Cards" },
+  { key: "teamupdate", label: "Team Update" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2068,6 +2086,24 @@ function renderRail(){
     rail.appendChild(simCardsTab);
   }
 
+  if (hasPageAccess("teamupdate")){
+    const teamUpdateTab = document.createElement("button");
+    teamUpdateTab.className = "tab";
+    teamUpdateTab.role = "tab";
+    teamUpdateTab.id = "tab-teamupdate";
+    teamUpdateTab.dataset.id = "teamupdate";
+    teamUpdateTab.setAttribute("aria-controls", "panel-teamupdate");
+    teamUpdateTab.innerHTML = `
+      <span class="tab-dot teamupdate-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Team Update</div>
+        <div class="tab-meta">News for the team</div>
+      </span>
+    `;
+    teamUpdateTab.addEventListener("click", () => selectProject("teamupdate"));
+    rail.appendChild(teamUpdateTab);
+  }
+
   const divider = document.createElement("div");
   divider.className = "rail-divider";
   rail.appendChild(divider);
@@ -2514,6 +2550,13 @@ simcardsPanel.role = "tabpanel";
 simcardsPanel.setAttribute("aria-labelledby", "tab-simcards");
 panelsEl.appendChild(simcardsPanel);
 
+const teamUpdatePanel = document.createElement("section");
+teamUpdatePanel.className = "panel";
+teamUpdatePanel.id = "panel-teamupdate";
+teamUpdatePanel.role = "tabpanel";
+teamUpdatePanel.setAttribute("aria-labelledby", "tab-teamupdate");
+panelsEl.appendChild(teamUpdatePanel);
+
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
 let settingsRenamingAction = null;
@@ -2826,6 +2869,89 @@ async function renderSimCards(){
   } catch (e) {
     simcardsPanel.innerHTML = `<p class="summary-facts">Couldn't load SIM cards: ${e.message} — has the sim-cards Edge Function been deployed, and is SIMCONTROL_API_KEY set?</p>`;
   }
+}
+
+function buildTeamUpdateRow(entry){
+  const row = document.createElement("div");
+  row.className = "activity-row";
+  row.innerHTML = `
+    <div class="activity-meta">
+      <span class="activity-who">${entry.created_by}</span>
+      <span class="activity-when">${formatChangeTimestamp(entry.created_at)}</span>
+    </div>
+    <div class="team-update-text"></div>
+  `;
+  row.querySelector(".team-update-text").textContent = entry.text;
+  return row;
+}
+async function postTeamUpdate(){
+  const textEl = document.getElementById("teamUpdateText");
+  const errorEl = document.getElementById("teamUpdateError");
+  const postBtn = document.getElementById("teamUpdatePostBtn");
+  errorEl.hidden = true;
+  const text = textEl.value.trim();
+  if (!text){
+    errorEl.textContent = "Please write something before posting.";
+    errorEl.hidden = false;
+    return;
+  }
+  postBtn.disabled = true;
+  try {
+    const { error } = await supabaseClient.from("team_updates").insert({
+      text,
+      created_by: authSession.user.email,
+    });
+    if (error) throw error;
+    textEl.value = "";
+    renderTeamUpdates();
+  } catch (e) {
+    errorEl.textContent = "Couldn't post — has supabase-team-updates.sql been run yet? (" + e.message + ")";
+    errorEl.hidden = false;
+  } finally {
+    postBtn.disabled = false;
+  }
+}
+async function renderTeamUpdates(){
+  if (!hasPageAccess("teamupdate")) return;
+  if (!supabaseClient || !authSession){
+    teamUpdatePanel.innerHTML = `<p class="summary-facts">Sign in to see team updates.</p>`;
+    return;
+  }
+  teamUpdatePanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const { data, error } = await supabaseClient
+    .from("team_updates")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (currentId !== "teamupdate") return; // user navigated away while this was loading
+  if (error){
+    teamUpdatePanel.innerHTML = `<p class="summary-facts">Couldn't load team updates — has supabase-team-updates.sql been run yet?</p>`;
+    return;
+  }
+  teamUpdatePanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Updates for the team, most recent first.</p>
+      <button type="button" class="btn btn-new" id="refreshTeamUpdatesBtn">↻ Refresh</button>
+    </div>
+    <div class="team-update-compose">
+      <textarea id="teamUpdateText" placeholder="Write an update for the team…" rows="3"></textarea>
+      <div class="modal-error" id="teamUpdateError" hidden></div>
+      <button type="button" class="btn btn-primary" id="teamUpdatePostBtn">Post update</button>
+    </div>
+  `;
+  if (!data.length){
+    const emptyMsg = document.createElement("p");
+    emptyMsg.className = "summary-facts";
+    emptyMsg.textContent = "No updates posted yet.";
+    teamUpdatePanel.appendChild(emptyMsg);
+  } else {
+    const list = document.createElement("div");
+    list.className = "activity-list";
+    data.forEach(entry => list.appendChild(buildTeamUpdateRow(entry)));
+    teamUpdatePanel.appendChild(list);
+  }
+  document.getElementById("refreshTeamUpdatesBtn").addEventListener("click", renderTeamUpdates);
+  document.getElementById("teamUpdatePostBtn").addEventListener("click", postTeamUpdate);
 }
 
 function renderSettings(){
@@ -3317,7 +3443,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -3376,6 +3502,10 @@ function selectProject(id){
     mainTitleEl.textContent = "SIM Cards";
     document.getElementById("crumb").textContent = "Overview";
     renderSimCards();
+  } else if (id === "teamupdate"){
+    mainTitleEl.textContent = "Team Update";
+    document.getElementById("crumb").textContent = "Overview";
+    renderTeamUpdates();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
