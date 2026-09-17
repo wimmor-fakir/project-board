@@ -828,7 +828,15 @@
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:18px; margin-bottom:16px; position:relative;
   }
-  .forecast-chart-scroll{ overflow-x:auto; }
+  .forecast-chart-scroll{
+    overflow-x:auto;
+    scrollbar-width:thin;
+    scrollbar-color:var(--border-strong) transparent;
+  }
+  .forecast-chart-scroll::-webkit-scrollbar{ height:8px; }
+  .forecast-chart-scroll::-webkit-scrollbar-track{ background:transparent; }
+  .forecast-chart-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .forecast-chart-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
   .forecast-chart-svg{ display:block; overflow:visible; }
   .forecast-axis-label{ font-size:10px; fill:var(--ink-3); font-family:inherit; }
   .forecast-bar-hit{ cursor:pointer; }
@@ -848,7 +856,13 @@
   .forecast-table-wrap{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); overflow-x:auto;
+    scrollbar-width:thin;
+    scrollbar-color:var(--border-strong) transparent;
   }
+  .forecast-table-wrap::-webkit-scrollbar{ height:8px; }
+  .forecast-table-wrap::-webkit-scrollbar-track{ background:transparent; }
+  .forecast-table-wrap::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .forecast-table-wrap::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
   .forecast-table{ width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
   .forecast-table th, .forecast-table td{ padding:8px 12px; text-align:right; }
   .forecast-table thead th{
