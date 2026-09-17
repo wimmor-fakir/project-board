@@ -24,6 +24,14 @@
     --danger-soft:#F7E4E1;
     --focus:#3D4B8C;
     --shadow: 0 1px 2px rgba(30,27,22,0.06), 0 4px 14px rgba(30,27,22,0.05);
+    --chart-1:#2a78d6;
+    --chart-2:#eb6834;
+    --chart-3:#1baf7a;
+    --chart-4:#eda100;
+    --chart-5:#e87ba4;
+    --chart-6:#008300;
+    --chart-other:#898781;
+    --chart-grid:#e1e0d9;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -47,6 +55,14 @@
       --danger-soft:#3A2320;
       --focus:#8C9AE8;
       --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.35);
+      --chart-1:#3987e5;
+      --chart-2:#d95926;
+      --chart-3:#199e70;
+      --chart-4:#c98500;
+      --chart-5:#d55181;
+      --chart-6:#008300;
+      --chart-other:#898781;
+      --chart-grid:#2c2c2a;
     }
   }
   :root[data-theme="dark"]{
@@ -70,6 +86,14 @@
     --danger-soft:#3A2320;
     --focus:#8C9AE8;
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.35);
+    --chart-1:#3987e5;
+    --chart-2:#d95926;
+    --chart-3:#199e70;
+    --chart-4:#c98500;
+    --chart-5:#d55181;
+    --chart-6:#008300;
+    --chart-other:#898781;
+    --chart-grid:#2c2c2a;
   }
 
   *{box-sizing:border-box;}
@@ -703,6 +727,10 @@
     border-top:5px solid transparent; border-bottom:5px solid transparent;
     border-left:9px solid var(--ink-3);
   }
+  .tab-dot.forecasting-dot{
+    background:var(--ink-3); width:11px; height:9px;
+    clip-path: polygon(0 9px,0 5px,2px 5px,2px 9px,4px 9px,4px 3px,6px 3px,6px 9px,8px 9px,8px 0,10px 0,10px 9px);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -794,6 +822,50 @@
     .tu-field-label{ margin-top:10px; }
     .tu-field-label:first-of-type{ margin-top:0; }
   }
+
+  /* ---------- Forecasting panel ---------- */
+  .forecast-chart-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:18px; margin-bottom:16px; position:relative;
+  }
+  .forecast-chart-scroll{ overflow-x:auto; }
+  .forecast-chart-svg{ display:block; overflow:visible; }
+  .forecast-axis-label{ font-size:10px; fill:var(--ink-3); font-family:inherit; }
+  .forecast-bar-hit{ cursor:pointer; }
+  .forecast-legend{ display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .forecast-legend-item{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-2); }
+  .forecast-legend-swatch{ width:10px; height:10px; border-radius:2px; flex:none; }
+  .forecast-tooltip{
+    position:absolute; z-index:5; min-width:180px;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    box-shadow:var(--shadow); padding:10px 12px; pointer-events:none;
+  }
+  .forecast-tooltip-heading{ font-size:12px; font-weight:700; color:var(--ink); margin-bottom:6px; }
+  .forecast-tooltip-row{ display:flex; align-items:center; gap:7px; font-size:12px; padding:2px 0; }
+  .forecast-tooltip-key{ width:8px; height:8px; border-radius:2px; flex:none; }
+  .forecast-tooltip-name{ color:var(--ink-2); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .forecast-tooltip-value{ font-weight:700; color:var(--ink); font-family:"IBM Plex Mono",monospace; }
+  .forecast-table-wrap{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); overflow-x:auto;
+  }
+  .forecast-table{ width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
+  .forecast-table th, .forecast-table td{ padding:8px 12px; text-align:right; }
+  .forecast-table thead th{
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ink-3); border-bottom:1px solid var(--border); text-align:center;
+  }
+  .forecast-table tbody tr{ border-bottom:1px solid var(--border); }
+  .forecast-table tbody tr:last-child{ border-bottom:none; }
+  .forecast-table tbody tr:hover{ background:var(--surface-sunken); }
+  .forecast-project-cell{
+    text-align:left; font-weight:600; white-space:normal; min-width:160px; max-width:220px;
+    position:sticky; left:0; background:var(--surface); z-index:1;
+  }
+  .forecast-table tbody tr:hover .forecast-project-cell{ background:var(--surface-sunken); }
+  .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
+  .forecast-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
+  .forecast-cell-input{ width:80px; text-align:right; }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -1582,6 +1654,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "activity", label: "Activity" },
   { key: "simcards", label: "SIM Cards" },
   { key: "teamupdate", label: "Team Update" },
+  { key: "forecasting", label: "Forecasting" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2125,6 +2198,24 @@ function renderRail(){
     rail.appendChild(teamUpdateTab);
   }
 
+  if (hasPageAccess("forecasting")){
+    const forecastingTab = document.createElement("button");
+    forecastingTab.className = "tab";
+    forecastingTab.role = "tab";
+    forecastingTab.id = "tab-forecasting";
+    forecastingTab.dataset.id = "forecasting";
+    forecastingTab.setAttribute("aria-controls", "panel-forecasting");
+    forecastingTab.innerHTML = `
+      <span class="tab-dot forecasting-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Forecasting</div>
+        <div class="tab-meta">Locations &amp; revenue</div>
+      </span>
+    `;
+    forecastingTab.addEventListener("click", () => selectProject("forecasting"));
+    rail.appendChild(forecastingTab);
+  }
+
   const divider = document.createElement("div");
   divider.className = "rail-divider";
   rail.appendChild(divider);
@@ -2577,6 +2668,13 @@ teamUpdatePanel.id = "panel-teamupdate";
 teamUpdatePanel.role = "tabpanel";
 teamUpdatePanel.setAttribute("aria-labelledby", "tab-teamupdate");
 panelsEl.appendChild(teamUpdatePanel);
+
+const forecastingPanel = document.createElement("section");
+forecastingPanel.className = "panel";
+forecastingPanel.id = "panel-forecasting";
+forecastingPanel.role = "tabpanel";
+forecastingPanel.setAttribute("aria-labelledby", "tab-forecasting");
+panelsEl.appendChild(forecastingPanel);
 
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
@@ -3039,6 +3137,276 @@ async function renderTeamUpdates(){
   }
   document.getElementById("refreshTeamUpdatesBtn").addEventListener("click", renderTeamUpdates);
   document.getElementById("teamUpdatePostBtn").addEventListener("click", postTeamUpdate);
+}
+
+/* ---------- Forecasting ---------- */
+function forecastMonthStr(offsetMonths){
+  const d = new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth() + offsetMonths, 1));
+  return d.toISOString().slice(0, 10);
+}
+const FORECAST_MONTHS = Array.from({ length: 12 }, (_, i) => forecastMonthStr(i));
+function forecastMonthLabel(monthStr, withYear){
+  const d = new Date(monthStr + "T00:00:00Z");
+  return d.toLocaleDateString("en-US", withYear ? { month: "short", year: "2-digit" } : { month: "short" });
+}
+function formatCurrency(n){
+  return "R" + Math.round(n).toLocaleString();
+}
+let forecastData = {}; // forecastData[projectId][month] = { locations, price }
+function forecastValue(projectId, month, field){
+  const row = forecastData[projectId] && forecastData[projectId][month];
+  return row ? row[field] : 0;
+}
+function forecastRevenue(projectId, month){
+  return forecastValue(projectId, month, "locations") * forecastValue(projectId, month, "price");
+}
+
+const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
+function buildForecastChart(){
+  // Rank projects by total forecasted revenue over the window; past the
+  // 6th, fold into "Other" rather than generating more categorical hues.
+  const totals = PROJECTS.map(p => ({
+    id: p.id, name: p.name,
+    total: FORECAST_MONTHS.reduce((sum, m) => sum + forecastRevenue(p.id, m), 0),
+  })).filter(t => t.total > 0).sort((a, b) => b.total - a.total);
+  const topProjects = totals.slice(0, FORECAST_CHART_COLORS.length);
+  const otherProjects = totals.slice(FORECAST_CHART_COLORS.length);
+  const series = topProjects.map((p, i) => ({ id: p.id, name: p.name, color: FORECAST_CHART_COLORS[i] }));
+  if (otherProjects.length) series.push({ id: "__other__", name: "Other projects", color: "var(--chart-other)" });
+
+  const monthData = FORECAST_MONTHS.map(month => {
+    const segments = series.map(s => ({
+      ...s,
+      value: s.id === "__other__"
+        ? otherProjects.reduce((sum, p) => sum + forecastRevenue(p.id, month), 0)
+        : forecastRevenue(s.id, month),
+    })).filter(s => s.value > 0);
+    return { month, segments, total: segments.reduce((sum, s) => sum + s.value, 0) };
+  });
+  const maxTotal = Math.max(1, ...monthData.map(m => m.total));
+
+  const card = document.createElement("div");
+  card.className = "forecast-chart-card";
+
+  if (!totals.length){
+    card.innerHTML = `<p class="summary-facts">No forecasted revenue yet — add locations and a price per month below.</p>`;
+    return card;
+  }
+
+  const chartH = 200;
+  const barW = 26;
+  const gap = 18;
+  const chartW = FORECAST_MONTHS.length * (barW + gap) + gap;
+  const radius = 4;
+
+  // "Nice" axis ceiling and 4 gridline steps.
+  const rawStep = maxTotal / 4;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = Math.ceil(rawStep / magnitude) * magnitude;
+  const axisMax = niceStep * 4;
+
+  let gridlines = "";
+  for (let i = 0; i <= 4; i++){
+    const y = chartH - (i * niceStep / axisMax) * chartH;
+    gridlines += `<line x1="0" y1="${y}" x2="${chartW}" y2="${y}" stroke="var(--chart-grid)" stroke-width="1"/>`;
+    gridlines += `<text x="-8" y="${y}" text-anchor="end" dominant-baseline="middle" class="forecast-axis-label">${formatCurrency(i * niceStep)}</text>`;
+  }
+
+  let bars = "";
+  monthData.forEach((m, i) => {
+    const x = gap + i * (barW + gap);
+    let yCursor = chartH;
+    m.segments.forEach((seg, si) => {
+      const segH = Math.max((seg.value / axisMax) * chartH - 2, 1); // 2px surface gap between segments
+      const y = yCursor - segH;
+      const isTop = si === m.segments.length - 1;
+      if (isTop){
+        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
+        if (segH > radius) bars += `<rect x="${x}" y="${y + segH - radius}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
+      } else {
+        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
+      }
+      yCursor = y - 2;
+    });
+    bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${x - gap / 2}" y="0" width="${barW + gap}" height="${chartH}" fill="transparent"/>`;
+  });
+
+  const labels = monthData.map((m, i) => {
+    const x = gap + i * (barW + gap) + barW / 2;
+    return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month)}</text>`;
+  }).join("");
+
+  card.innerHTML = `
+    <div class="forecast-chart-scroll">
+      <svg viewBox="-70 -10 ${chartW + 80} ${chartH + 36}" width="${chartW + 80}" height="${chartH + 36}" class="forecast-chart-svg">
+        ${gridlines}
+        ${bars}
+        ${labels}
+      </svg>
+    </div>
+    <div class="forecast-legend">
+      ${series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")}
+    </div>
+    <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
+  `;
+
+  const tooltip = card.querySelector("#forecastTooltip");
+  card.querySelectorAll("[data-forecast-bar]").forEach(hitRect => {
+    const m = monthData[Number(hitRect.dataset.forecastBar)];
+    hitRect.addEventListener("mouseenter", (e) => showForecastTooltip(tooltip, card, hitRect, m));
+    hitRect.addEventListener("mousemove", (e) => showForecastTooltip(tooltip, card, hitRect, m));
+    hitRect.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+    hitRect.addEventListener("focus", () => showForecastTooltip(tooltip, card, hitRect, m));
+    hitRect.addEventListener("blur", () => { tooltip.hidden = true; });
+  });
+
+  return card;
+}
+function showForecastTooltip(tooltip, card, hitRect, monthEntry){
+  if (!monthEntry.segments.length) { tooltip.hidden = true; return; }
+  tooltip.innerHTML = "";
+  const heading = document.createElement("div");
+  heading.className = "forecast-tooltip-heading";
+  heading.textContent = forecastMonthLabel(monthEntry.month, true) + " — " + formatCurrency(monthEntry.total);
+  tooltip.appendChild(heading);
+  [...monthEntry.segments].reverse().forEach(seg => {
+    const row = document.createElement("div");
+    row.className = "forecast-tooltip-row";
+    const key = document.createElement("span");
+    key.className = "forecast-tooltip-key";
+    key.style.background = seg.color;
+    const name = document.createElement("span");
+    name.className = "forecast-tooltip-name";
+    name.textContent = seg.name;
+    const value = document.createElement("span");
+    value.className = "forecast-tooltip-value";
+    value.textContent = formatCurrency(seg.value);
+    row.appendChild(key);
+    row.appendChild(name);
+    row.appendChild(value);
+    tooltip.appendChild(row);
+  });
+  const cardRect = card.getBoundingClientRect();
+  const hitRectBounds = hitRect.getBoundingClientRect();
+  tooltip.hidden = false;
+  tooltip.style.left = Math.min(hitRectBounds.left - cardRect.left, cardRect.width - tooltip.offsetWidth - 8) + "px";
+  tooltip.style.top = (hitRectBounds.top - cardRect.top - tooltip.offsetHeight - 10) + "px";
+}
+
+function buildForecastTable(){
+  const wrap = document.createElement("div");
+  wrap.className = "forecast-table-wrap";
+  const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
+  const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
+  const rows = PROJECTS.map(p => {
+    const cells = FORECAST_MONTHS.map(m => {
+      const locations = forecastValue(p.id, m, "locations");
+      const price = forecastValue(p.id, m, "price");
+      return `
+        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
+        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span></td>
+      `;
+    }).join("");
+    return `
+      <tr>
+        <td class="forecast-project-cell">${p.name}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join("");
+  wrap.innerHTML = `
+    <table class="forecast-table">
+      <thead>
+        <tr><th class="forecast-project-cell">Project</th>${monthHeaders}</tr>
+        <tr><th class="forecast-project-cell"></th>${subHeaders}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  return wrap;
+}
+
+async function saveForecastValue(projectId, month, field, value){
+  if (!forecastData[projectId]) forecastData[projectId] = {};
+  if (!forecastData[projectId][month]) forecastData[projectId][month] = { locations: 0, price: 0 };
+  forecastData[projectId][month][field] = value;
+  try {
+    const { error } = await supabaseClient.from("project_forecasts").upsert({
+      project_id: projectId,
+      month,
+      [field]: value,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "project_id,month" });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
+  }
+}
+function openInlineForecastEditor(el, projectId, month, field){
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = field === "price" ? "0.01" : "1";
+  input.className = "inline-date-input forecast-cell-input";
+  input.value = el.dataset.value || "0";
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const parsed = parseFloat(input.value);
+    const value = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    if (value !== parseFloat(el.dataset.value || "0")){
+      await saveForecastValue(projectId, month, field, value);
+    }
+    renderForecastingContent();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderForecastingContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+
+function renderForecastingContent(){
+  forecastingPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Forecasted monthly revenue (locations × price) per project.</p>
+      <button type="button" class="btn btn-new" id="refreshForecastingBtn">↻ Refresh</button>
+    </div>
+  `;
+  forecastingPanel.appendChild(buildForecastChart());
+  forecastingPanel.appendChild(buildForecastTable());
+  document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
+}
+async function renderForecasting(){
+  if (!hasPageAccess("forecasting")) return;
+  if (!supabaseClient || !authSession){
+    forecastingPanel.innerHTML = `<p class="summary-facts">Sign in to see forecasting.</p>`;
+    return;
+  }
+  forecastingPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const { data, error } = await supabaseClient
+    .from("project_forecasts")
+    .select("*")
+    .gte("month", FORECAST_MONTHS[0])
+    .lte("month", FORECAST_MONTHS[FORECAST_MONTHS.length - 1]);
+  if (currentId !== "forecasting") return; // user navigated away while this was loading
+  if (error){
+    forecastingPanel.innerHTML = `<p class="summary-facts">Couldn't load forecasting data — has supabase-project-forecasts.sql been run yet?</p>`;
+    return;
+  }
+  forecastData = {};
+  data.forEach(row => {
+    if (!forecastData[row.project_id]) forecastData[row.project_id] = {};
+    forecastData[row.project_id][row.month] = { locations: row.locations, price: Number(row.price) };
+  });
+  renderForecastingContent();
 }
 
 function renderSettings(){
@@ -3530,7 +3898,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -3593,6 +3961,10 @@ function selectProject(id){
     mainTitleEl.textContent = "Team Update";
     document.getElementById("crumb").textContent = "Overview";
     renderTeamUpdates();
+  } else if (id === "forecasting"){
+    mainTitleEl.textContent = "Forecasting";
+    document.getElementById("crumb").textContent = "Overview";
+    renderForecasting();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
@@ -4800,6 +5172,11 @@ document.addEventListener("click", (e) => {
   const editSimRechargeEl = e.target.closest("[data-edit-sim-recharge]");
   if (editSimRechargeEl){
     openInlineSimRechargeEditor(editSimRechargeEl, editSimRechargeEl.dataset.editSimRecharge);
+    return;
+  }
+  const editForecastEl = e.target.closest("[data-edit-forecast]");
+  if (editForecastEl){
+    openInlineForecastEditor(editForecastEl, editForecastEl.dataset.editForecast, editForecastEl.dataset.forecastMonth, editForecastEl.dataset.forecastField);
     return;
   }
   const sortSimCardsEl = e.target.closest("[data-sort-key]");
