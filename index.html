@@ -875,17 +875,8 @@
   .forecast-project-cell{
     text-align:left; font-weight:600; white-space:normal; min-width:160px; max-width:220px;
     position:sticky; left:0; background:var(--surface); z-index:1;
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
   }
-  .forecast-table thead .forecast-project-cell{ display:table-cell; }
   .forecast-table tbody tr:hover .forecast-project-cell{ background:var(--surface-sunken); }
-  .forecast-project-name{ min-width:0; }
-  .forecast-project-count{
-    flex:none; font-family:"IBM Plex Mono",monospace; font-weight:700; font-size:11px;
-    color:var(--accent); background:var(--accent-soft); border-radius:999px;
-    padding:2px 7px; min-width:20px; text-align:center;
-  }
-  .forecast-project-count.zero{ color:var(--ink-3); background:var(--surface-sunken); }
   .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
   .forecast-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
   .forecast-cell-input{ width:80px; text-align:right; }
@@ -3187,11 +3178,6 @@ function forecastValue(projectId, month, field){
 function forecastRevenue(projectId, month){
   return forecastValue(projectId, month, "locations") * forecastValue(projectId, month, "price");
 }
-// How many months have anything entered for this project — the count
-// shown next to its name, and what pushes empty projects to the bottom.
-function forecastLineCount(projectId){
-  return FORECAST_MONTHS.filter(m => forecastValue(projectId, m, "locations") > 0 || forecastValue(projectId, m, "price") > 0).length;
-}
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
 function buildForecastChart(){
@@ -3330,14 +3316,7 @@ function buildForecastTable(){
   wrap.className = "forecast-table-wrap";
   const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
   const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
-  // Projects with at least one filled-in month keep their normal order;
-  // projects with nothing entered yet (count 0) sink to the bottom.
-  const withCounts = PROJECTS.map(p => ({ p, count: forecastLineCount(p.id) }));
-  const orderedProjects = [
-    ...withCounts.filter(x => x.count > 0),
-    ...withCounts.filter(x => x.count === 0),
-  ];
-  const rows = orderedProjects.map(({ p, count }) => {
+  const rows = PROJECTS.map(p => {
     const cells = FORECAST_MONTHS.map((m, i) => {
       const locations = forecastValue(p.id, m, "locations");
       const price = forecastValue(p.id, m, "price");
@@ -3350,10 +3329,7 @@ function buildForecastTable(){
     }).join("");
     return `
       <tr>
-        <td class="forecast-project-cell">
-          <span class="forecast-project-name">${p.name}</span>
-          <span class="forecast-project-count ${count === 0 ? "zero" : ""}" title="${count} of ${FORECAST_MONTHS.length} months have data entered">${count}</span>
-        </td>
+        <td class="forecast-project-cell">${p.name}</td>
         ${cells}
       </tr>
     `;
