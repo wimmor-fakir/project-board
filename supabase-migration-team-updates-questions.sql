@@ -9,4 +9,6 @@ alter table team_updates add column if not exists priority text;
 alter table team_updates add column if not exists needs_help text;
 
 -- The old free-text column is no longer written to by the app, but it's
--- left in place (and any old posts in it) rather than dropped.
+-- left in place (and any old posts in it) rather than dropped — it just
+-- can't stay required, or every new post fails with a not-null violation.
+alter table team_updates alter column text drop not null;
