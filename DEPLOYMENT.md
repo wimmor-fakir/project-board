@@ -48,6 +48,10 @@ when you open the live site** — all one-time, no-code steps:
      before running it — it changes the `project_forecasts` table's
      primary key and drops its old `project_id` column (your data is kept,
      just moved onto "Line 1").
+   - **Already had lines but no per-line checkbox to include/exclude a
+     line from the chart?** Run `supabase-migration-forecast-line-chart-toggle.sql`
+     once — it adds that column, defaulting every existing line to
+     included (matching how they behaved before the toggle existed).
 5. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -390,6 +394,7 @@ step 3 above to redeploy with the new value.
 | Run `supabase-team-updates.sql` too | Creates the table behind the Team Update page (one row per person per day) |
 | Run `supabase-project-forecasts.sql` too | Creates the tables behind the Forecasting page (each project can have multiple named lines, each with its own locations & price per month) |
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
+| Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |

@@ -902,6 +902,8 @@
   .forecast-line-step-btn:disabled:hover{ background:var(--surface); color:var(--ink-2); border-color:var(--border); }
   .forecast-line-count{ font-size:10.5px; font-weight:600; color:var(--ink-3); white-space:nowrap; }
   .forecast-line-cell{ padding-left:28px; font-weight:400; }
+  .forecast-line-chart-toggle{ display:inline-flex; align-items:center; margin-right:6px; cursor:pointer; vertical-align:middle; }
+  .forecast-line-chart-toggle input{ cursor:pointer; }
   .forecast-line-label-editable{ cursor:pointer; }
   .forecast-line-label-editable:hover{ text-decoration:underline; color:var(--accent); }
 
@@ -3201,7 +3203,9 @@ function forecastRevenue(lineId, month){
   return forecastValue(lineId, month, "locations") * forecastValue(lineId, month, "price");
 }
 function projectForecastRevenue(projectId, month){
-  return linesForProject(projectId).reduce((sum, line) => sum + forecastRevenue(line.id, month), 0);
+  return linesForProject(projectId)
+    .filter(line => line.included_in_chart !== false)
+    .reduce((sum, line) => sum + forecastRevenue(line.id, month), 0);
 }
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
@@ -3367,9 +3371,13 @@ function buildForecastTable(){
           <td><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span>${copyBtn}</td>
         `;
       }).join("");
+      const checked = line.included_in_chart !== false;
       return `
         <tr class="forecast-line-row">
           <td class="forecast-project-cell forecast-line-cell">
+            <label class="forecast-line-chart-toggle" title="Include this line in the chart above">
+              <input type="checkbox" data-toggle-forecast-line-chart="${line.id}" ${checked ? "checked" : ""}>
+            </label>
             <span class="forecast-line-label-editable" data-edit-line-label="${line.id}">${line.label}</span>
           </td>
           ${cells}
@@ -3514,7 +3522,7 @@ async function addForecastLine(projectId){
     }).select().single();
     if (error) throw error;
     if (!forecastLines[projectId]) forecastLines[projectId] = [];
-    forecastLines[projectId].push({ id: data.id, label: data.label, sort_order: data.sort_order });
+    forecastLines[projectId].push({ id: data.id, label: data.label, sort_order: data.sort_order, included_in_chart: data.included_in_chart });
     renderForecastingContent();
   } catch (e) {
     alert("Couldn't add a line — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
@@ -3548,6 +3556,17 @@ async function renameForecastLine(lineId, newLabel){
     if (found) found.line.label = newLabel;
   } catch (e) {
     alert("Couldn't rename the line: " + e.message);
+  }
+  renderForecastingContent();
+}
+async function toggleForecastLineChart(lineId, included){
+  try {
+    const { error } = await supabaseClient.from("forecast_lines").update({ included_in_chart: included }).eq("id", lineId);
+    if (error) throw error;
+    const found = findForecastLine(lineId);
+    if (found) found.line.included_in_chart = included;
+  } catch (e) {
+    alert("Couldn't update the chart toggle: " + e.message);
   }
   renderForecastingContent();
 }
@@ -3586,7 +3605,7 @@ async function renderForecasting(){
   forecastLines = {};
   linesResult.data.forEach(row => {
     if (!forecastLines[row.project_id]) forecastLines[row.project_id] = [];
-    forecastLines[row.project_id].push({ id: row.id, label: row.label, sort_order: row.sort_order });
+    forecastLines[row.project_id].push({ id: row.id, label: row.label, sort_order: row.sort_order, included_in_chart: row.included_in_chart });
   });
   forecastData = {};
   forecastsResult.data.forEach(row => {
@@ -3778,6 +3797,8 @@ async function setUserPageAccess(checkbox){
 document.addEventListener("change", (e) => {
   const checkbox = e.target.closest("[data-user-page-access]");
   if (checkbox) setUserPageAccess(checkbox);
+  const chartToggle = e.target.closest("[data-toggle-forecast-line-chart]");
+  if (chartToggle) toggleForecastLineChart(chartToggle.dataset.toggleForecastLineChart, chartToggle.checked);
 });
 
 async function inviteUser(){

@@ -13,6 +13,7 @@ create table if not exists forecast_lines (
   project_id text not null,
   label text not null default 'Line 1',
   sort_order integer not null default 0,
+  included_in_chart boolean not null default true,
   created_by text,
   created_at timestamptz not null default now()
 );
