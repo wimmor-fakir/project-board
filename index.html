@@ -3147,7 +3147,8 @@ async function renderTeamUpdates(){
 
 /* ---------- Forecasting ---------- */
 const FORECAST_YEAR = 2026;
-const FORECAST_MONTHS = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(FORECAST_YEAR, i, 1)).toISOString().slice(0, 10));
+const FORECAST_YEAR_COUNT = 2;
+const FORECAST_MONTHS = Array.from({ length: FORECAST_YEAR_COUNT * 12 }, (_, i) => new Date(Date.UTC(FORECAST_YEAR, i, 1)).toISOString().slice(0, 10));
 function forecastMonthLabel(monthStr, withYear){
   const d = new Date(monthStr + "T00:00:00Z");
   return d.toLocaleDateString("en-US", withYear ? { month: "short", year: "2-digit" } : { month: "short" });
@@ -3236,7 +3237,7 @@ function buildForecastChart(){
 
   const labels = monthData.map((m, i) => {
     const x = gap + i * (barW + gap) + barW / 2;
-    return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month)}</text>`;
+    return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month, true)}</text>`;
   }).join("");
 
   card.innerHTML = `
