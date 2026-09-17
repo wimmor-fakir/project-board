@@ -716,6 +716,20 @@
   .settings-status-swatch{ width:14px; height:14px; border-radius:50%; flex:none; }
   .settings-status-label{ font-size:13.5px; font-weight:600; flex:1; min-width:0; }
   .settings-status-usage{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+  .user-mgmt-row{
+    display:flex; flex-direction:column; gap:8px;
+    padding:8px 10px; border:1px solid var(--border); border-radius:8px;
+    background:var(--surface-sunken);
+  }
+  .user-mgmt-head{ display:flex; align-items:center; gap:10px; }
+  .user-mgmt-access{ display:flex; gap:14px; flex-wrap:wrap; padding-left:2px; }
+  .user-mgmt-access-item{
+    display:flex; align-items:center; gap:5px;
+    font-size:12px; color:var(--ink-2); cursor:pointer;
+  }
+  .user-mgmt-access-item input{ cursor:pointer; }
+  .user-mgmt-access-item.disabled{ opacity:.6; cursor:default; }
+  .user-mgmt-access-item.disabled input{ cursor:default; }
 
   /* ---------- Activity panel ---------- */
   .activity-list{ display:flex; flex-direction:column; gap:8px; }
@@ -1525,6 +1539,19 @@ const ADMIN_EMAIL = "wim@hawktivity.com";
 function isAdmin(){
   return !!(authSession && authSession.user && authSession.user.email === ADMIN_EMAIL);
 }
+const PAGE_ACCESS_PAGES = [
+  { key: "settings", label: "Settings" },
+  { key: "activity", label: "Activity" },
+  { key: "simcards", label: "SIM Cards" },
+];
+// The admin always has access to every gated page, regardless of what's
+// stored — this is a client-side convenience, not real enforcement; the
+// sim-cards Edge Function is what actually enforces the SIM Cards case.
+function hasPageAccess(page){
+  if (isAdmin()) return true;
+  const access = authSession && authSession.user && authSession.user.user_metadata && authSession.user.user_metadata.page_access;
+  return !!(access && access[page]);
+}
 const BOARD_DATA_ROW = "data";
 const BOARD_PHOTOS_ROW = "photos";
 let supabaseClient = null;
@@ -1987,39 +2014,43 @@ function renderRail(){
   peopleTab.addEventListener("click", () => selectProject("people"));
   rail.appendChild(peopleTab);
 
-  const settingsTab = document.createElement("button");
-  settingsTab.className = "tab";
-  settingsTab.role = "tab";
-  settingsTab.id = "tab-settings";
-  settingsTab.dataset.id = "settings";
-  settingsTab.setAttribute("aria-controls", "panel-settings");
-  settingsTab.innerHTML = `
-    <span class="tab-dot settings-dot"></span>
-    <span class="tab-body">
-      <div class="tab-name">Settings</div>
-      <div class="tab-meta">Statuses and options</div>
-    </span>
-  `;
-  settingsTab.addEventListener("click", () => selectProject("settings"));
-  rail.appendChild(settingsTab);
+  if (hasPageAccess("settings")){
+    const settingsTab = document.createElement("button");
+    settingsTab.className = "tab";
+    settingsTab.role = "tab";
+    settingsTab.id = "tab-settings";
+    settingsTab.dataset.id = "settings";
+    settingsTab.setAttribute("aria-controls", "panel-settings");
+    settingsTab.innerHTML = `
+      <span class="tab-dot settings-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Settings</div>
+        <div class="tab-meta">Statuses and options</div>
+      </span>
+    `;
+    settingsTab.addEventListener("click", () => selectProject("settings"));
+    rail.appendChild(settingsTab);
+  }
 
-  const activityTab = document.createElement("button");
-  activityTab.className = "tab";
-  activityTab.role = "tab";
-  activityTab.id = "tab-activity";
-  activityTab.dataset.id = "activity";
-  activityTab.setAttribute("aria-controls", "panel-activity");
-  activityTab.innerHTML = `
-    <span class="tab-dot activity-dot"></span>
-    <span class="tab-body">
-      <div class="tab-name">Activity</div>
-      <div class="tab-meta">Who changed what</div>
-    </span>
-  `;
-  activityTab.addEventListener("click", () => selectProject("activity"));
-  rail.appendChild(activityTab);
+  if (hasPageAccess("activity")){
+    const activityTab = document.createElement("button");
+    activityTab.className = "tab";
+    activityTab.role = "tab";
+    activityTab.id = "tab-activity";
+    activityTab.dataset.id = "activity";
+    activityTab.setAttribute("aria-controls", "panel-activity");
+    activityTab.innerHTML = `
+      <span class="tab-dot activity-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Activity</div>
+        <div class="tab-meta">Who changed what</div>
+      </span>
+    `;
+    activityTab.addEventListener("click", () => selectProject("activity"));
+    rail.appendChild(activityTab);
+  }
 
-  if (isAdmin()){
+  if (hasPageAccess("simcards")){
     const simCardsTab = document.createElement("button");
     simCardsTab.className = "tab";
     simCardsTab.role = "tab";
@@ -2658,6 +2689,7 @@ function renderActivityList(){
   activityPanel.appendChild(list);
 }
 async function renderActivity(){
+  if (!hasPageAccess("activity")) return;
   if (!supabaseClient || !authSession){
     activityPanel.innerHTML = `<p class="summary-facts">Sign in to see activity history.</p>`;
     return;
@@ -2764,7 +2796,7 @@ function toggleSimCardsSort(key){
   renderSimCardsTableOnly();
 }
 async function renderSimCards(){
-  if (!isAdmin()) return;
+  if (!hasPageAccess("simcards")) return;
   if (!supabaseClient || !authSession){
     simcardsPanel.innerHTML = `<p class="summary-facts">Sign in to see SIM card data.</p>`;
     return;
@@ -2797,6 +2829,7 @@ async function renderSimCards(){
 }
 
 function renderSettings(){
+  if (!hasPageAccess("settings")) return;
   const healthRows = HEALTH_OPTIONS.map(opt => buildSettingsStatusRow(
     opt, "health",
     PROJECTS.filter(p => p.health === opt.value).length,
@@ -2861,7 +2894,7 @@ function renderSettings(){
     ${isAdmin() ? `
     <div class="settings-section">
       <div class="settings-section-title">User management</div>
-      <p class="field-hint">Only ${ADMIN_EMAIL} can see this section. Invited people get an email with a link to set their own password.</p>
+      <p class="field-hint">Only ${ADMIN_EMAIL} can see this section. Invited people get an email with a link to set their own password. Use the checkboxes below to control who can see the Settings, Activity, and SIM Cards pages — nobody but you has access to any of them by default.</p>
       <div class="add-option-form" style="margin-top:0; flex-direction:row; gap:8px; align-items:center;">
         <input id="inviteUserEmail" type="email" autocomplete="off" placeholder="teammate@example.com" style="flex:1;">
         <button type="button" class="btn btn-secondary" id="inviteUserBtn">Send invite</button>
@@ -2892,15 +2925,28 @@ function renderSettings(){
 
 function buildUserRow(u){
   const row = document.createElement("div");
-  row.className = "settings-status-row";
+  row.className = "user-mgmt-row";
   const isSelf = authSession && authSession.user.id === u.id;
+  const rowIsAdmin = u.email === ADMIN_EMAIL;
   const lastSignIn = u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : "Never signed in";
+  const access = u.page_access || {};
+  const checkboxesHtml = PAGE_ACCESS_PAGES.map(p => {
+    const checked = rowIsAdmin || !!access[p.key];
+    return `
+      <label class="user-mgmt-access-item ${rowIsAdmin ? "disabled" : ""}" title="${rowIsAdmin ? "The admin always has access to every page" : `Let ${u.email} see the ${p.label} page`}">
+        <input type="checkbox" data-user-page-access="${u.id}" data-page="${p.key}" ${checked ? "checked" : ""} ${rowIsAdmin ? "disabled" : ""}>
+        ${p.label}
+      </label>`;
+  }).join("");
   row.innerHTML = `
-    <div class="settings-status-label">${u.email}</div>
-    <div class="settings-status-usage">${lastSignIn}</div>
-    <div class="settings-status-actions">
-      ${isSelf ? "" : `<button type="button" class="btn btn-text" data-remove-user="${u.id}" data-user-email="${u.email}">Remove</button>`}
+    <div class="user-mgmt-head">
+      <div class="settings-status-label">${u.email}</div>
+      <div class="settings-status-usage">${lastSignIn}</div>
+      <div class="settings-status-actions">
+        ${isSelf ? "" : `<button type="button" class="btn btn-text" data-remove-user="${u.id}" data-user-email="${u.email}">Remove</button>`}
+      </div>
     </div>
+    <div class="user-mgmt-access">${checkboxesHtml}</div>
   `;
   return row;
 }
@@ -2944,6 +2990,27 @@ async function removeUser(userId, email){
     alert("Couldn't remove user: " + e.message);
   }
 }
+
+async function setUserPageAccess(checkbox){
+  const userId = checkbox.dataset.userPageAccess;
+  const page = checkbox.dataset.page;
+  const allow = checkbox.checked;
+  checkbox.disabled = true;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("manage-users", { body: { action: "set_page_access", userId, page, allow } });
+    if (error) throw new Error(await describeFunctionError(error));
+    if (data && data.error) throw new Error(data.error);
+  } catch (e) {
+    checkbox.checked = !allow;
+    alert("Couldn't update access: " + e.message);
+  } finally {
+    checkbox.disabled = false;
+  }
+}
+document.addEventListener("change", (e) => {
+  const checkbox = e.target.closest("[data-user-page-access]");
+  if (checkbox) setUserPageAccess(checkbox);
+});
 
 async function inviteUser(){
   const emailInput = document.getElementById("inviteUserEmail");
@@ -3414,6 +3481,7 @@ function refreshViews(){
 
 function refreshAll(){
   syncRostersFromActions();
+  if (PAGE_ACCESS_PAGES.some(p => p.key === currentId) && !hasPageAccess(currentId)) currentId = "summary";
   renderRail();
   renderSummary();
   renderByPerson();
@@ -4557,7 +4625,7 @@ renderSettings();
 let initialTab = "summary";
 try {
   const storedTab = localStorage.getItem(TAB_STORAGE_KEY);
-  if (storedTab && (storedTab === "summary" || storedTab === "people" || storedTab === "settings" || storedTab === "activity" || PROJECTS.some(p => p.id === storedTab))){
+  if (storedTab && (storedTab === "summary" || storedTab === "people" || PAGE_ACCESS_PAGES.some(p => p.key === storedTab) || PROJECTS.some(p => p.id === storedTab))){
     initialTab = storedTab;
   }
 } catch (err) {}

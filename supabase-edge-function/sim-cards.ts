@@ -2,11 +2,12 @@
 //
 // Holds the secret SIMcontrol API key server-side so the app can show SIM
 // card balance/usage without ever exposing that key to the browser. Only
-// the account matching ADMIN_EMAIL below may use it. Deploy this via the
-// Supabase dashboard: Edge Functions -> Deploy a new function -> name it
-// "sim-cards" -> paste this file's contents -> Deploy. Then set the
-// SIMCONTROL_API_KEY secret (Edge Functions -> sim-cards -> Secrets, or
-// `supabase secrets set SIMCONTROL_API_KEY=...`). See DEPLOYMENT.md.
+// the ADMIN_EMAIL account, or a user the admin has granted "SIM Cards"
+// page access to (Settings -> User management), may use it. Deploy this
+// via the Supabase dashboard: Edge Functions -> Deploy a new function ->
+// name it "sim-cards" -> paste this file's contents -> Deploy. Then set
+// the SIMCONTROL_API_KEY secret (Edge Functions -> sim-cards -> Secrets,
+// or `supabase secrets set SIMCONTROL_API_KEY=...`). See DEPLOYMENT.md.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -107,7 +108,8 @@ Deno.serve(async (req) => {
 
     const { data: { user }, error: userError } = await adminClient.auth.getUser(token);
     if (userError || !user) return jsonResponse({ error: "Not signed in" }, 401);
-    if (user.email !== ADMIN_EMAIL) return jsonResponse({ error: "Not authorized" }, 403);
+    const hasAccess = user.email === ADMIN_EMAIL || !!(user.user_metadata && user.user_metadata.page_access && user.user_metadata.page_access.simcards);
+    if (!hasAccess) return jsonResponse({ error: "Not authorized" }, 403);
 
     const apiKey = Deno.env.get("SIMCONTROL_API_KEY");
     if (!apiKey) return jsonResponse({ error: "SIMCONTROL_API_KEY secret is not set for this function." }, 500);

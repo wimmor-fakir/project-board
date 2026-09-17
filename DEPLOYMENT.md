@@ -244,10 +244,14 @@ only if a specific need for something more restrictive comes up.
 ## Part 5 — Deploy the user-management Edge Function
 
 The Settings page has an admin-only "User management" section (invite
-people by email, remove accounts). It only works for the account whose
-email matches `ADMIN_EMAIL` in `supabase-edge-function/manage-users.ts`
-(currently `wim@hawktivity.com`) — everyone else won't even see that
-section.
+people by email, remove accounts, and tick which of the Settings,
+Activity, and SIM Cards pages each person can see). It only works for
+the account whose email matches `ADMIN_EMAIL` in
+`supabase-edge-function/manage-users.ts` (currently
+`wim@hawktivity.com`) — everyone else won't even see that section.
+By default, nobody but the admin can see the Settings, Activity, or
+SIM Cards pages at all — that's controlled by the checkboxes in this
+section, one tick per person per page.
 
 **Why this needs a separate step:** inviting and deleting users requires
 Supabase's admin API, which only works with the `service_role` key — an
@@ -270,6 +274,14 @@ still letting the app call it safely over the internet.
 6. Test it: sign in to your live site as `wim@hawktivity.com`, open
    **Settings**, and you should see "User management" at the bottom with
    a list of current users instead of an error.
+
+**Already had this function deployed before per-page access existed?**
+Re-copy `supabase-edge-function/manage-users.ts` into it and redeploy
+(steps 4-5 above) to pick up the checkboxes. One consequence worth
+knowing: the moment this redeploys, everyone except the admin loses
+access to Settings, Activity, and SIM Cards until you re-tick the
+pages they should keep seeing — nothing else about their account
+changes.
 
 Before inviting anyone from this section, make sure Part 4 step 4 (Site
 URL / Redirect URLs pointing at your real site, not `localhost:3000`) is

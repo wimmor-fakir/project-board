@@ -14,6 +14,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Change this if the admin account ever changes, then redeploy this function.
 const ADMIN_EMAIL = "wim@hawktivity.com";
 
+// Keep in sync with PAGE_ACCESS_PAGES in index.html.
+const VALID_PAGES = ["settings", "activity", "simcards"];
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -59,6 +62,7 @@ Deno.serve(async (req) => {
         created_at: u.created_at,
         last_sign_in_at: u.last_sign_in_at,
         confirmed_at: u.confirmed_at,
+        page_access: (u.user_metadata && u.user_metadata.page_access) || {},
       }));
       return jsonResponse({ users });
     }
@@ -69,6 +73,23 @@ Deno.serve(async (req) => {
       const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email);
       if (error) throw error;
       return jsonResponse({ success: true, user: data.user });
+    }
+
+    if (action === "set_page_access") {
+      const targetUserId = body.userId;
+      const page = body.page;
+      const allow = !!body.allow;
+      if (!targetUserId || !VALID_PAGES.includes(page)) return jsonResponse({ error: "Missing or invalid userId/page" }, 400);
+      const { data: targetUser, error: getError } = await adminClient.auth.admin.getUserById(targetUserId);
+      if (getError || !targetUser || !targetUser.user) return jsonResponse({ error: "User not found" }, 404);
+      // Merge, not replace — updateUserById overwrites the whole
+      // user_metadata object, and it also holds password_changed.
+      const currentMetadata = targetUser.user.user_metadata || {};
+      const currentAccess = currentMetadata.page_access || {};
+      const newMetadata = { ...currentMetadata, page_access: { ...currentAccess, [page]: allow } };
+      const { error } = await adminClient.auth.admin.updateUserById(targetUserId, { user_metadata: newMetadata });
+      if (error) throw error;
+      return jsonResponse({ success: true });
     }
 
     if (action === "delete") {
