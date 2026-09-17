@@ -3058,6 +3058,21 @@ function renderSettings(){
   )).join("");
 
   settingsPanel.innerHTML = `
+    ${isAdmin() ? `
+    <div class="settings-section">
+      <div class="settings-section-title">User management</div>
+      <p class="field-hint">Only ${ADMIN_EMAIL} can see this section. Invited people get an email with a link to set their own password. Use the checkboxes below to control who can see the Settings, Activity, and SIM Cards pages — nobody but you has access to any of them by default.</p>
+      <div class="add-option-form" style="margin-top:0; flex-direction:row; gap:8px; align-items:center;">
+        <input id="inviteUserEmail" type="email" autocomplete="off" placeholder="teammate@example.com" style="flex:1;">
+        <button type="button" class="btn btn-secondary" id="inviteUserBtn">Send invite</button>
+      </div>
+      <div class="modal-error" id="inviteUserError" hidden></div>
+      <p class="field-hint" id="inviteUserStatus"></p>
+      <div class="settings-status-list" id="userListContainer" style="margin-top:14px;">
+        <p class="summary-facts">Loading users…</p>
+      </div>
+    </div>
+    ` : ""}
     <div class="settings-section">
       <div class="settings-section-title">Project statuses</div>
       <div class="settings-status-list">${healthRows}</div>
@@ -3104,21 +3119,6 @@ function renderSettings(){
         <button type="button" class="btn btn-secondary" id="settingsActionAddConfirm">Add status</button>
       </div>
     </div>
-    ${isAdmin() ? `
-    <div class="settings-section">
-      <div class="settings-section-title">User management</div>
-      <p class="field-hint">Only ${ADMIN_EMAIL} can see this section. Invited people get an email with a link to set their own password. Use the checkboxes below to control who can see the Settings, Activity, and SIM Cards pages — nobody but you has access to any of them by default.</p>
-      <div class="add-option-form" style="margin-top:0; flex-direction:row; gap:8px; align-items:center;">
-        <input id="inviteUserEmail" type="email" autocomplete="off" placeholder="teammate@example.com" style="flex:1;">
-        <button type="button" class="btn btn-secondary" id="inviteUserBtn">Send invite</button>
-      </div>
-      <div class="modal-error" id="inviteUserError" hidden></div>
-      <p class="field-hint" id="inviteUserStatus"></p>
-      <div class="settings-status-list" id="userListContainer" style="margin-top:14px;">
-        <p class="summary-facts">Loading users…</p>
-      </div>
-    </div>
-    ` : ""}
   `;
 
   document.getElementById("settingsHealthColorPresets").innerHTML = COLOR_PRESETS.map(hex => `
