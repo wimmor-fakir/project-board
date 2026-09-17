@@ -886,6 +886,24 @@
     color:var(--ink-3); cursor:pointer; vertical-align:middle;
   }
   .forecast-copy-btn:hover{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-soft-border); }
+  .forecast-project-header-row{ background:var(--surface-sunken); }
+  .forecast-project-header-row:hover{ background:var(--surface-sunken); }
+  .forecast-project-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .forecast-project-header-row .forecast-project-cell{ background:var(--surface-sunken); }
+  .forecast-project-name{ font-weight:700; }
+  .forecast-line-stepper{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
+  .forecast-line-step-btn{
+    width:20px; height:20px; line-height:1; font-size:13px; font-weight:600;
+    border:1px solid var(--border); border-radius:4px; background:var(--surface);
+    color:var(--ink-2); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .forecast-line-step-btn:hover{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-soft-border); }
+  .forecast-line-step-btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .forecast-line-step-btn:disabled:hover{ background:var(--surface); color:var(--ink-2); border-color:var(--border); }
+  .forecast-line-count{ font-size:10.5px; font-weight:600; color:var(--ink-3); white-space:nowrap; }
+  .forecast-line-cell{ padding-left:28px; font-weight:400; }
+  .forecast-line-label-editable{ cursor:pointer; }
+  .forecast-line-label-editable:hover{ text-decoration:underline; color:var(--accent); }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -3170,13 +3188,20 @@ function forecastMonthLabel(monthStr, withYear){
 function formatCurrency(n){
   return "R" + Math.round(n).toLocaleString();
 }
-let forecastData = {}; // forecastData[projectId][month] = { locations, price }
-function forecastValue(projectId, month, field){
-  const row = forecastData[projectId] && forecastData[projectId][month];
+let forecastData = {}; // forecastData[lineId][month] = { locations, price }
+let forecastLines = {}; // forecastLines[projectId] = [{ id, label, sort_order }, ...] sorted by sort_order
+function linesForProject(projectId){
+  return forecastLines[projectId] || [];
+}
+function forecastValue(lineId, month, field){
+  const row = forecastData[lineId] && forecastData[lineId][month];
   return row ? row[field] : 0;
 }
-function forecastRevenue(projectId, month){
-  return forecastValue(projectId, month, "locations") * forecastValue(projectId, month, "price");
+function forecastRevenue(lineId, month){
+  return forecastValue(lineId, month, "locations") * forecastValue(lineId, month, "price");
+}
+function projectForecastRevenue(projectId, month){
+  return linesForProject(projectId).reduce((sum, line) => sum + forecastRevenue(line.id, month), 0);
 }
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
@@ -3185,7 +3210,7 @@ function buildForecastChart(){
   // 6th, fold into "Other" rather than generating more categorical hues.
   const totals = PROJECTS.map(p => ({
     id: p.id, name: p.name,
-    total: FORECAST_MONTHS.reduce((sum, m) => sum + forecastRevenue(p.id, m), 0),
+    total: FORECAST_MONTHS.reduce((sum, m) => sum + projectForecastRevenue(p.id, m), 0),
   })).filter(t => t.total > 0).sort((a, b) => b.total - a.total);
   const topProjects = totals.slice(0, FORECAST_CHART_COLORS.length);
   const otherProjects = totals.slice(FORECAST_CHART_COLORS.length);
@@ -3196,8 +3221,8 @@ function buildForecastChart(){
     const segments = series.map(s => ({
       ...s,
       value: s.id === "__other__"
-        ? otherProjects.reduce((sum, p) => sum + forecastRevenue(p.id, month), 0)
-        : forecastRevenue(s.id, month),
+        ? otherProjects.reduce((sum, p) => sum + projectForecastRevenue(p.id, month), 0)
+        : projectForecastRevenue(s.id, month),
     })).filter(s => s.value > 0);
     return { month, segments, total: segments.reduce((sum, s) => sum + s.value, 0) };
   });
@@ -3317,22 +3342,41 @@ function buildForecastTable(){
   const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
   const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
   const rows = PROJECTS.map(p => {
-    const cells = FORECAST_MONTHS.map((m, i) => {
-      const locations = forecastValue(p.id, m, "locations");
-      const price = forecastValue(p.id, m, "price");
-      const isLastMonth = i === FORECAST_MONTHS.length - 1;
-      const copyBtn = isLastMonth ? "" : `<button type="button" class="forecast-copy-btn" data-copy-forecast="${p.id}" data-copy-from-month="${m}" title="Copy this month's locations &amp; price to every month after it">→</button>`;
-      return `
-        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
-        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span>${copyBtn}</td>
-      `;
-    }).join("");
-    return `
-      <tr>
-        <td class="forecast-project-cell">${p.name}</td>
-        ${cells}
+    const lines = linesForProject(p.id);
+    const headerRow = `
+      <tr class="forecast-project-header-row">
+        <td class="forecast-project-cell forecast-project-header">
+          <span class="forecast-project-name">${p.name}</span>
+          <span class="forecast-line-stepper">
+            <button type="button" class="forecast-line-step-btn" data-remove-line-project="${p.id}" ${lines.length ? "" : "disabled"} title="Remove the last line">−</button>
+            <span class="forecast-line-count">${lines.length} line${lines.length === 1 ? "" : "s"}</span>
+            <button type="button" class="forecast-line-step-btn" data-add-line-project="${p.id}" title="Add a line">+</button>
+          </span>
+        </td>
+        ${FORECAST_MONTHS.map(() => `<td colspan="2"></td>`).join("")}
       </tr>
     `;
+    const lineRows = lines.map(line => {
+      const cells = FORECAST_MONTHS.map((m, i) => {
+        const locations = forecastValue(line.id, m, "locations");
+        const price = forecastValue(line.id, m, "price");
+        const isLastMonth = i === FORECAST_MONTHS.length - 1;
+        const copyBtn = isLastMonth ? "" : `<button type="button" class="forecast-copy-btn" data-copy-forecast="${line.id}" data-copy-from-month="${m}" title="Copy this month's locations &amp; price to every month after it">→</button>`;
+        return `
+          <td><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
+          <td><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span>${copyBtn}</td>
+        `;
+      }).join("");
+      return `
+        <tr class="forecast-line-row">
+          <td class="forecast-project-cell forecast-line-cell">
+            <span class="forecast-line-label-editable" data-edit-line-label="${line.id}">${line.label}</span>
+          </td>
+          ${cells}
+        </tr>
+      `;
+    }).join("");
+    return headerRow + lineRows;
   }).join("");
   wrap.innerHTML = `
     <table class="forecast-table">
@@ -3346,54 +3390,63 @@ function buildForecastTable(){
   return wrap;
 }
 
-async function saveForecastValue(projectId, month, field, value){
-  if (!forecastData[projectId]) forecastData[projectId] = {};
-  if (!forecastData[projectId][month]) forecastData[projectId][month] = { locations: 0, price: 0 };
-  forecastData[projectId][month][field] = value;
+async function saveForecastValue(lineId, month, field, value){
+  if (!forecastData[lineId]) forecastData[lineId] = {};
+  if (!forecastData[lineId][month]) forecastData[lineId][month] = { locations: 0, price: 0 };
+  forecastData[lineId][month][field] = value;
   try {
     const { error } = await supabaseClient.from("project_forecasts").upsert({
-      project_id: projectId,
+      line_id: lineId,
       month,
       [field]: value,
       updated_by: authSession.user.email,
       updated_at: new Date().toISOString(),
-    }, { onConflict: "project_id,month" });
+    }, { onConflict: "line_id,month" });
     if (error) throw error;
   } catch (e) {
     alert("Couldn't save — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
   }
 }
-async function saveForecastPair(projectId, month, locations, price){
-  if (!forecastData[projectId]) forecastData[projectId] = {};
-  forecastData[projectId][month] = { locations, price };
+async function saveForecastPair(lineId, month, locations, price){
+  if (!forecastData[lineId]) forecastData[lineId] = {};
+  forecastData[lineId][month] = { locations, price };
   const { error } = await supabaseClient.from("project_forecasts").upsert({
-    project_id: projectId,
+    line_id: lineId,
     month,
     locations,
     price,
     updated_by: authSession.user.email,
     updated_at: new Date().toISOString(),
-  }, { onConflict: "project_id,month" });
+  }, { onConflict: "line_id,month" });
   if (error) throw error;
 }
-async function copyForecastRight(projectId, fromMonth){
+function findForecastLine(lineId){
+  for (const projectId in forecastLines){
+    const line = forecastLines[projectId].find(l => String(l.id) === String(lineId));
+    if (line) return { line, projectId };
+  }
+  return null;
+}
+async function copyForecastRight(lineId, fromMonth){
   const fromIndex = FORECAST_MONTHS.indexOf(fromMonth);
   if (fromIndex === -1 || fromIndex === FORECAST_MONTHS.length - 1) return;
-  const source = (forecastData[projectId] && forecastData[projectId][fromMonth]) || { locations: 0, price: 0 };
+  const source = (forecastData[lineId] && forecastData[lineId][fromMonth]) || { locations: 0, price: 0 };
   const targets = FORECAST_MONTHS.slice(fromIndex + 1);
-  const project = PROJECTS.find(p => p.id === projectId);
+  const found = findForecastLine(lineId);
+  const project = found ? PROJECTS.find(p => p.id === found.projectId) : null;
+  const label = found ? `${found.line.label}${project ? " (" + project.name + ")" : ""}` : "this line";
   const confirmed = window.confirm(
-    `Copy ${source.locations} location(s) at ${formatCurrency(source.price)}/month from ${forecastMonthLabel(fromMonth, true)} to all ${targets.length} month(s) after it for ${project ? project.name : "this project"}?\n\nThis overwrites any values already entered in those months.`
+    `Copy ${source.locations} location(s) at ${formatCurrency(source.price)}/month from ${forecastMonthLabel(fromMonth, true)} to all ${targets.length} month(s) after it for ${label}?\n\nThis overwrites any values already entered in those months.`
   );
   if (!confirmed) return;
   try {
-    await Promise.all(targets.map(m => saveForecastPair(projectId, m, source.locations, source.price)));
+    await Promise.all(targets.map(m => saveForecastPair(lineId, m, source.locations, source.price)));
   } catch (e) {
     alert("Couldn't copy to every month: " + e.message);
   }
   renderForecastingContent();
 }
-function openInlineForecastEditor(el, projectId, month, field){
+function openInlineForecastEditor(el, lineId, month, field){
   const input = document.createElement("input");
   input.type = "number";
   input.min = "0";
@@ -3410,7 +3463,7 @@ function openInlineForecastEditor(el, projectId, month, field){
     const parsed = parseFloat(input.value);
     const value = isNaN(parsed) || parsed < 0 ? 0 : parsed;
     if (value !== parseFloat(el.dataset.value || "0")){
-      await saveForecastValue(projectId, month, field, value);
+      await saveForecastValue(lineId, month, field, value);
     }
     renderForecastingContent();
   };
@@ -3421,6 +3474,82 @@ function openInlineForecastEditor(el, projectId, month, field){
     if (e.key === "Escape"){ settled = true; renderForecastingContent(); }
     else if (e.key === "Enter"){ commit(); }
   });
+}
+function openInlineLineLabelEditor(el, lineId){
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-date-input forecast-cell-input";
+  input.value = el.textContent;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const trimmed = input.value.trim();
+    if (trimmed && trimmed !== el.textContent){
+      await renameForecastLine(lineId, trimmed);
+    } else {
+      renderForecastingContent();
+    }
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderForecastingContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+async function addForecastLine(projectId){
+  const existing = linesForProject(projectId);
+  const label = "Line " + (existing.length + 1);
+  try {
+    const { data, error } = await supabaseClient.from("forecast_lines").insert({
+      project_id: projectId,
+      label,
+      sort_order: existing.length,
+      created_by: authSession.user.email,
+    }).select().single();
+    if (error) throw error;
+    if (!forecastLines[projectId]) forecastLines[projectId] = [];
+    forecastLines[projectId].push({ id: data.id, label: data.label, sort_order: data.sort_order });
+    renderForecastingContent();
+  } catch (e) {
+    alert("Couldn't add a line — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
+  }
+}
+async function removeForecastLine(projectId){
+  const lines = linesForProject(projectId);
+  if (!lines.length) return;
+  const line = lines[lines.length - 1];
+  const hasData = FORECAST_MONTHS.some(m => forecastValue(line.id, m, "locations") > 0 || forecastValue(line.id, m, "price") > 0);
+  const project = PROJECTS.find(p => p.id === projectId);
+  const confirmed = window.confirm(
+    `Remove "${line.label}" from ${project ? project.name : "this project"}?${hasData ? " This deletes all its monthly locations/price data too." : ""}`
+  );
+  if (!confirmed) return;
+  try {
+    const { error } = await supabaseClient.from("forecast_lines").delete().eq("id", line.id);
+    if (error) throw error;
+    forecastLines[projectId] = lines.slice(0, -1);
+    delete forecastData[line.id];
+    renderForecastingContent();
+  } catch (e) {
+    alert("Couldn't remove the line: " + e.message);
+  }
+}
+async function renameForecastLine(lineId, newLabel){
+  try {
+    const { error } = await supabaseClient.from("forecast_lines").update({ label: newLabel }).eq("id", lineId);
+    if (error) throw error;
+    const found = findForecastLine(lineId);
+    if (found) found.line.label = newLabel;
+  } catch (e) {
+    alert("Couldn't rename the line: " + e.message);
+  }
+  renderForecastingContent();
 }
 
 function renderForecastingContent(){
@@ -3441,20 +3570,28 @@ async function renderForecasting(){
     return;
   }
   forecastingPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
-  const { data, error } = await supabaseClient
-    .from("project_forecasts")
-    .select("*")
-    .gte("month", FORECAST_MONTHS[0])
-    .lte("month", FORECAST_MONTHS[FORECAST_MONTHS.length - 1]);
+  const [linesResult, forecastsResult] = await Promise.all([
+    supabaseClient.from("forecast_lines").select("*").order("sort_order", { ascending: true }),
+    supabaseClient
+      .from("project_forecasts")
+      .select("*")
+      .gte("month", FORECAST_MONTHS[0])
+      .lte("month", FORECAST_MONTHS[FORECAST_MONTHS.length - 1]),
+  ]);
   if (currentId !== "forecasting") return; // user navigated away while this was loading
-  if (error){
+  if (linesResult.error || forecastsResult.error){
     forecastingPanel.innerHTML = `<p class="summary-facts">Couldn't load forecasting data — has supabase-project-forecasts.sql been run yet?</p>`;
     return;
   }
+  forecastLines = {};
+  linesResult.data.forEach(row => {
+    if (!forecastLines[row.project_id]) forecastLines[row.project_id] = [];
+    forecastLines[row.project_id].push({ id: row.id, label: row.label, sort_order: row.sort_order });
+  });
   forecastData = {};
-  data.forEach(row => {
-    if (!forecastData[row.project_id]) forecastData[row.project_id] = {};
-    forecastData[row.project_id][row.month] = { locations: row.locations, price: Number(row.price) };
+  forecastsResult.data.forEach(row => {
+    if (!forecastData[row.line_id]) forecastData[row.line_id] = {};
+    forecastData[row.line_id][row.month] = { locations: row.locations, price: Number(row.price) };
   });
   renderForecastingContent();
 }
@@ -5232,6 +5369,21 @@ document.addEventListener("click", (e) => {
   const copyForecastBtn = e.target.closest("[data-copy-forecast]");
   if (copyForecastBtn){
     copyForecastRight(copyForecastBtn.dataset.copyForecast, copyForecastBtn.dataset.copyFromMonth);
+    return;
+  }
+  const editLineLabelEl = e.target.closest("[data-edit-line-label]");
+  if (editLineLabelEl){
+    openInlineLineLabelEditor(editLineLabelEl, editLineLabelEl.dataset.editLineLabel);
+    return;
+  }
+  const addLineBtn = e.target.closest("[data-add-line-project]");
+  if (addLineBtn){
+    addForecastLine(addLineBtn.dataset.addLineProject);
+    return;
+  }
+  const removeLineBtn = e.target.closest("[data-remove-line-project]");
+  if (removeLineBtn){
+    removeForecastLine(removeLineBtn.dataset.removeLineProject);
     return;
   }
   const sortSimCardsEl = e.target.closest("[data-sort-key]");

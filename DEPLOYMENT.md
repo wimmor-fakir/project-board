@@ -34,8 +34,20 @@ when you open the live site** — all one-time, no-code steps:
      same-day duplicates for the same person, keeping only the latest;
      see the comments in that file before running it). Both are safe to
      run even if you're not sure whether they're needed.
-4. **Run `supabase-project-forecasts.sql`** too — creates the table behind
-   the Forecasting page (locations and price per project per month).
+4. **Run `supabase-project-forecasts.sql`** too — creates the tables behind
+   the Forecasting page. Each project can have multiple named forecasting
+   lines (e.g. "Product A", "Product B"), and each line has its own
+   locations and price per month.
+   - **Already ran an earlier version of this script** (from before a
+     project could have more than one line)? Run
+     `supabase-migration-forecast-lines.sql` once instead — it moves your
+     existing per-project numbers onto an automatically-created "Line 1"
+     for each project, then updates the table structure to key off lines
+     instead of projects. Safe to run even if you're not sure; it does
+     nothing if already applied. Read the comments at the top of that file
+     before running it — it changes the `project_forecasts` table's
+     primary key and drops its old `project_id` column (your data is kept,
+     just moved onto "Line 1").
 5. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -376,7 +388,8 @@ step 3 above to redeploy with the new value.
 | Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
 | Run `supabase-team-updates.sql` too | Creates the table behind the Team Update page (one row per person per day) |
-| Run `supabase-project-forecasts.sql` too | Creates the table behind the Forecasting page (locations & price per project per month) |
+| Run `supabase-project-forecasts.sql` too | Creates the tables behind the Forecasting page (each project can have multiple named lines, each with its own locations & price per month) |
+| Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
