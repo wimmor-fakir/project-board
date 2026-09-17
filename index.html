@@ -1663,20 +1663,31 @@ async function loadBoardFromSupabase(){
   if (error) throw error;
   const dataRow = data.find(r => r.id === BOARD_DATA_ROW);
   const photosRow = data.find(r => r.id === BOARD_PHOTOS_ROW);
+  const isFirstRun = !dataRow && !photosRow;
+
+  // Held through refreshAll() below (same as onRemoteDataChanged()) so this
+  // load never echoes a blind publishState() overwrite back to the server —
+  // otherwise a client that fetched a moment before someone else's edit
+  // landed could silently clobber it with no trace, since publishState()
+  // doesn't go through the (logged) item-edit path.
+  applyingRemoteUpdate = true;
+  if (dataRow) applyBoardData(dataRow.payload);
+  if (photosRow) applyPhotoData(photosRow.payload);
   if (dataRow || photosRow) {
-    applyingRemoteUpdate = true;
-    if (dataRow) applyBoardData(dataRow.payload);
-    if (photosRow) applyPhotoData(photosRow.payload);
-    applyingRemoteUpdate = false;
     try { localStorage.removeItem(STATE_KEY); } catch (e) {}
     usingLocalFallback = false;
   }
   // Backfill any missing project/action codes (also covers this board's very
   // first run, seeding the database with the current — now coded — state).
-  backfillCodes();
+  const codesChanged = backfillCodes();
   dbReady = true;
   setSaveStatus("saved");
   refreshAll();
+  applyingRemoteUpdate = false;
+
+  // These are genuine local changes worth saving — everything else this
+  // load produced was just a render of what's already on the server.
+  if (isFirstRun || codesChanged) publishState();
 }
 
 let realtimeSubscribed = false;
