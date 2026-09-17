@@ -15,7 +15,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const ADMIN_EMAIL = "wim@hawktivity.com";
 
 // Keep in sync with PAGE_ACCESS_PAGES in index.html.
-const VALID_PAGES = ["settings", "activity", "simcards", "teamupdate"];
+const VALID_PAGES = ["settings", "activity", "simcards", "teamupdate", "forecasting"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
