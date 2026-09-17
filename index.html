@@ -723,8 +723,13 @@
     background:var(--surface); border:1px solid var(--border); border-radius:10px;
     padding:10px 12px; box-shadow:var(--shadow);
   }
-  .activity-meta{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:4px; }
+  .activity-meta{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:4px; flex-wrap:wrap; }
+  .activity-who-line{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
   .activity-who{ font-weight:600; font-size:12.5px; }
+  .activity-project{
+    font-size:11px; font-weight:600; color:var(--accent);
+    background:var(--accent-soft); border-radius:999px; padding:1px 8px;
+  }
   .activity-when{ font-size:11px; color:var(--ink-3); white-space:nowrap; }
   .activity-summary{
     display:flex; align-items:center; flex-wrap:wrap; gap:8px;
@@ -1354,6 +1359,9 @@ const companyFilter = new Set();
 const summaryProjectFilter = new Set();
 const summaryHealthFilter = new Set();
 const summaryPersonFilter = new Set();
+const activityAccountFilter = new Set();
+const activityProjectFilter = new Set();
+let activityTimeFilter = null; // null | "hour" | "day" | "week"
 let projectNameQuery = "";
 function dateOffsetStr(offsetDays){
   const d = new Date(TODAY);
@@ -1399,6 +1407,9 @@ function saveFilterState(){
       project: Array.from(summaryProjectFilter),
       health: Array.from(summaryHealthFilter),
       summaryPerson: Array.from(summaryPersonFilter),
+      activityAccount: Array.from(activityAccountFilter),
+      activityProject: Array.from(activityProjectFilter),
+      activityTime: activityTimeFilter,
       projectQuery: projectNameQuery,
     }));
   } catch (err) {}
@@ -1416,6 +1427,9 @@ function loadFilterState(){
     (parsed.project || []).forEach(id => summaryProjectFilter.add(id));
     (parsed.health || []).forEach(v => summaryHealthFilter.add(v));
     (parsed.summaryPerson || []).forEach(name => summaryPersonFilter.add(name));
+    (parsed.activityAccount || []).forEach(v => activityAccountFilter.add(v));
+    (parsed.activityProject || []).forEach(v => activityProjectFilter.add(v));
+    activityTimeFilter = parsed.activityTime || null;
     projectNameQuery = parsed.projectQuery || "";
   } catch (err) {}
 }
@@ -2506,6 +2520,24 @@ function formatChangeTimestamp(iso){
   const d = new Date(iso);
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+function projectNamesFromIds(projectIds){
+  return (projectIds || []).map(id => (PROJECTS.find(p => p.id === id) || {}).name).filter(Boolean);
+}
+function projectNameFromActionCode(code){
+  if (!code) return null;
+  const project = PROJECTS.find(p => p.code === code.split("-")[0]);
+  return project ? project.name : null;
+}
+// Best-effort: the current item (if it still exists) is the most accurate
+// source; a deleted entry's own payload snapshot is the next best; failing
+// that, fall back to the project-code prefix baked into the action code.
+function activityEntryProjectNames(entry){
+  const item = findItemById(entry.action_id);
+  if (item) return projectNamesFromIds(item.projectIds);
+  if (entry.payload && entry.payload.projectIds) return projectNamesFromIds(entry.payload.projectIds);
+  const fallback = projectNameFromActionCode(entry.action_code);
+  return fallback ? [fallback] : [];
+}
 const activityEntriesById = new Map();
 function buildActivityRow(entry){
   const row = document.createElement("div");
@@ -2516,10 +2548,15 @@ function buildActivityRow(entry){
         ? `<button type="button" class="activity-code-link mono" data-open-item="${entry.action_id}" title="Open this action item">${entry.action_code}</button> · `
         : `<span class="mono">${entry.action_code}</span> · `)
     : "";
+  const projectNames = activityEntryProjectNames(entry);
+  const projectBit = projectNames.length ? `<span class="activity-project">${projectNames.join(", ")}</span>` : "";
   const canRestore = entry.change_type === "deleted" && !itemExists && entry.payload;
   row.innerHTML = `
     <div class="activity-meta">
-      <span class="activity-who">${entry.changed_by}</span>
+      <span class="activity-who-line">
+        <span class="activity-who">${entry.changed_by}</span>
+        ${projectBit}
+      </span>
       <span class="activity-when">${formatChangeTimestamp(entry.created_at)}</span>
     </div>
     <div class="activity-summary">
@@ -2528,6 +2565,97 @@ function buildActivityRow(entry){
     </div>
   `;
   return row;
+}
+const ACTIVITY_TIME_OPTIONS = [
+  { value: "hour", label: "Last hour", ms: 60 * 60 * 1000 },
+  { value: "day", label: "Last day", ms: 24 * 60 * 60 * 1000 },
+  { value: "week", label: "Last week", ms: 7 * 24 * 60 * 60 * 1000 },
+];
+let activityLogData = [];
+let activityFiltersExpanded = false;
+function matchesActivityFilters(entry, projectNames){
+  if (activityAccountFilter.size > 0 && !activityAccountFilter.has(entry.changed_by)) return false;
+  if (activityProjectFilter.size > 0 && !projectNames.some(n => activityProjectFilter.has(n))) return false;
+  if (activityTimeFilter){
+    const opt = ACTIVITY_TIME_OPTIONS.find(o => o.value === activityTimeFilter);
+    if (opt && Date.now() - new Date(entry.created_at).getTime() > opt.ms) return false;
+  }
+  return true;
+}
+function toggleActivityAccountFilter(value){
+  if (activityAccountFilter.has(value)) activityAccountFilter.delete(value); else activityAccountFilter.add(value);
+  saveFilterState();
+  renderActivityList();
+}
+function toggleActivityProjectFilter(value){
+  if (activityProjectFilter.has(value)) activityProjectFilter.delete(value); else activityProjectFilter.add(value);
+  saveFilterState();
+  renderActivityList();
+}
+function setActivityTimeFilter(value){
+  activityTimeFilter = activityTimeFilter === value ? null : value;
+  saveFilterState();
+  renderActivityList();
+}
+function renderActivityList(){
+  if (!activityLogData.length){
+    activityPanel.innerHTML = `<p class="summary-facts">No activity recorded yet.</p>`;
+    return;
+  }
+  const entriesWithProjects = activityLogData.map(entry => ({ entry, projectNames: activityEntryProjectNames(entry) }));
+  const accounts = Array.from(new Set(activityLogData.map(e => e.changed_by))).sort();
+  const projects = Array.from(new Set(entriesWithProjects.flatMap(e => e.projectNames))).sort();
+  const visible = entriesWithProjects.filter(({ entry, projectNames }) => matchesActivityFilters(entry, projectNames));
+
+  const filtersActive = activityAccountFilter.size > 0 || activityProjectFilter.size > 0 || !!activityTimeFilter;
+  const selectedCount = activityAccountFilter.size + activityProjectFilter.size + (activityTimeFilter ? 1 : 0);
+  const chipsVisible = activityFiltersExpanded || selectedCount > 0;
+
+  const accountChips = accounts.map(a => `
+    <button type="button" class="filter-btn ${activityAccountFilter.has(a) ? "active" : ""}" data-activity-account-filter="${a}">${a}</button>
+  `).join("");
+  const projectChips = projects.map(p => `
+    <button type="button" class="filter-btn ${activityProjectFilter.has(p) ? "active" : ""}" data-activity-project-filter="${p}">${p}</button>
+  `).join("");
+  const timeChips = ACTIVITY_TIME_OPTIONS.map(o => `
+    <button type="button" class="filter-btn ${activityTimeFilter === o.value ? "active" : ""}" data-activity-time-filter="${o.value}">${o.label}</button>
+  `).join("");
+
+  activityPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Who changed which action item, most recent first.</p>
+    </div>
+    <div class="filter-panel">
+      <button type="button" class="filter-toggle" id="activityFilterToggle" aria-expanded="${chipsVisible}">${chipsVisible ? "Hide filters ▾" : "Show filters ▸"}${selectedCount > 0 ? ` · ${selectedCount} selected` : ""}</button>
+      ${chipsVisible ? `
+      <div class="filter-block">
+        <span class="filter-label">Account</span>
+        <div class="filter-group" role="group" aria-label="Filter by account (select any number)">${accountChips}</div>
+      </div>
+      ${projects.length ? `
+      <div class="filter-block">
+        <span class="filter-label">Project</span>
+        <div class="filter-group" role="group" aria-label="Filter by project (select any number)">${projectChips}</div>
+      </div>` : ""}
+      <div class="filter-block">
+        <span class="filter-label">Time</span>
+        <div class="filter-group" role="group" aria-label="Filter by how recent (select one)">${timeChips}</div>
+      </div>` : ""}
+      ${filtersActive ? `<button type="button" class="btn btn-clear-filters" id="clearActivityFilters">✕ Clear filters</button>` : ""}
+    </div>
+    ${filtersActive ? `<p class="summary-filter-note">Showing ${visible.length} of ${activityLogData.length} entries.</p>` : ""}
+  `;
+  if (!visible.length){
+    const emptyMsg = document.createElement("p");
+    emptyMsg.className = "summary-facts";
+    emptyMsg.textContent = "No activity matches the current filters.";
+    activityPanel.appendChild(emptyMsg);
+    return;
+  }
+  const list = document.createElement("div");
+  list.className = "activity-list";
+  visible.forEach(({ entry }) => list.appendChild(buildActivityRow(entry)));
+  activityPanel.appendChild(list);
 }
 async function renderActivity(){
   if (!supabaseClient || !authSession){
@@ -2545,21 +2673,10 @@ async function renderActivity(){
     activityPanel.innerHTML = `<p class="summary-facts">Couldn't load activity — has supabase-activity-log.sql been run yet?</p>`;
     return;
   }
-  if (!data.length){
-    activityPanel.innerHTML = `<p class="summary-facts">No activity recorded yet.</p>`;
-    return;
-  }
+  activityLogData = data;
   activityEntriesById.clear();
   data.forEach(entry => activityEntriesById.set(entry.id, entry));
-  activityPanel.innerHTML = `
-    <div class="summary-intro">
-      <p>Who changed which action item, most recent first.</p>
-    </div>
-  `;
-  const list = document.createElement("div");
-  list.className = "activity-list";
-  data.forEach(entry => list.appendChild(buildActivityRow(entry)));
-  activityPanel.appendChild(list);
+  renderActivityList();
 }
 
 function formatDataMb(mb){
@@ -4250,6 +4367,34 @@ document.addEventListener("click", (e) => {
     saveFilterState();
     renderRail();
     renderSummary();
+    return;
+  }
+  if (e.target.closest("#activityFilterToggle")){
+    activityFiltersExpanded = !activityFiltersExpanded;
+    renderActivityList();
+    return;
+  }
+  if (e.target.closest("#clearActivityFilters")){
+    activityAccountFilter.clear();
+    activityProjectFilter.clear();
+    activityTimeFilter = null;
+    saveFilterState();
+    renderActivityList();
+    return;
+  }
+  const activityAccountBtn = e.target.closest("[data-activity-account-filter]");
+  if (activityAccountBtn){
+    toggleActivityAccountFilter(activityAccountBtn.dataset.activityAccountFilter);
+    return;
+  }
+  const activityProjectBtn = e.target.closest("[data-activity-project-filter]");
+  if (activityProjectBtn){
+    toggleActivityProjectFilter(activityProjectBtn.dataset.activityProjectFilter);
+    return;
+  }
+  const activityTimeBtn = e.target.closest("[data-activity-time-filter]");
+  if (activityTimeBtn){
+    setActivityTimeFilter(activityTimeBtn.dataset.activityTimeFilter);
     return;
   }
   const personFilterBtn = e.target.closest("[data-person-filter]");
