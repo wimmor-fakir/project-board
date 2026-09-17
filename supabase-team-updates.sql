@@ -15,10 +15,12 @@ create table if not exists team_updates (
 
 alter table team_updates enable row level security;
 
+drop policy if exists "Signed-in users can read team updates" on team_updates;
 create policy "Signed-in users can read team updates"
   on team_updates for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Signed-in users can post team updates" on team_updates;
 create policy "Signed-in users can post team updates"
   on team_updates for insert
   with check (auth.role() = 'authenticated');
