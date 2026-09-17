@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="118" viewBox="0 0 100 118">
+  <defs>
+    <linearGradient id="lg1" x1="42.12" y1="101.39" x2="42.12" y2="2.3" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#27aae1"/>
+      <stop offset="1" stop-color="#262262"/>
+    </linearGradient>
+    <linearGradient id="lg2" x1="35.49" y1="101.39" x2="35.49" y2="2.28" href="#lg1"/>
+    <linearGradient id="lg3" x1="41.28" y1="101.39" x2="41.28" y2="2.3" href="#lg1"/>
+    <linearGradient id="lg4" x1="61.47" y1="101.39" x2="61.47" y2="2.3" href="#lg1"/>
+    <linearGradient id="lg5" x1="78.83" y1="101.39" x2="78.83" y2="2.3" href="#lg1"/>
+    <linearGradient id="lg6" x1="83.69" y1="101.39" x2="83.69" y2="2.3" href="#lg1"/>
+    <linearGradient id="lg7" x1="84.14" y1="101.39" x2="84.14" y2="2.3" href="#lg1"/>
+  </defs>
+  <polygon fill="url(#lg1)" points="25.86 34.3 9.72 0 58.38 14.83 74.52 49.13 25.86 34.3"/>
+  <polygon fill="url(#lg2)" points="32.22 75.34 0 65.57 38.75 42.31 70.97 52.08 32.22 75.34"/>
+  <polygon fill="url(#lg3)" points="48.36 97.01 27.91 109.2 34.2 77.87 54.66 65.68 48.36 97.01"/>
+  <polygon fill="url(#lg4)" points="70.64 98.89 67.01 116.96 52.31 97.08 55.94 79.01 70.64 98.89"/>
+  <polygon fill="url(#lg5)" points="84.04 87.21 92.37 98.53 73.61 96.62 65.28 85.3 84.04 87.21"/>
+  <polygon fill="url(#lg6)" points="83.68 74.1 94.16 75.13 83.7 84.63 73.22 83.6 83.68 74.1"/>
+  <path fill="url(#lg7)" d="m69.55,29.33l8.07,18.08,12.67-5.16,8.44,2.58-1.95-4.54c-2.66-6.19-7.84-10.94-14.23-13.05h0s-13,2.09-13,2.09Z"/>
+</svg>
