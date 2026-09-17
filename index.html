@@ -3345,7 +3345,13 @@ function buildForecastTable(){
   wrap.className = "forecast-table-wrap";
   const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
   const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
-  const rows = PROJECTS.map(p => {
+  // Stable partition: projects with at least one line keep the standard
+  // project order; 0-line projects sink to the bottom, in that same order.
+  const orderedProjects = [
+    ...PROJECTS.filter(p => linesForProject(p.id).length > 0),
+    ...PROJECTS.filter(p => linesForProject(p.id).length === 0),
+  ];
+  const rows = orderedProjects.map(p => {
     const lines = linesForProject(p.id);
     const headerRow = `
       <tr class="forecast-project-header-row">
