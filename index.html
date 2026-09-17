@@ -866,6 +866,12 @@
   .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
   .forecast-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
   .forecast-cell-input{ width:80px; text-align:right; }
+  .forecast-copy-btn{
+    margin-left:6px; font-size:11px; line-height:1; padding:3px 5px;
+    border:1px solid var(--border); border-radius:4px; background:var(--surface-sunken);
+    color:var(--ink-3); cursor:pointer; vertical-align:middle;
+  }
+  .forecast-copy-btn:hover{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-soft-border); }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -3140,11 +3146,8 @@ async function renderTeamUpdates(){
 }
 
 /* ---------- Forecasting ---------- */
-function forecastMonthStr(offsetMonths){
-  const d = new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth() + offsetMonths, 1));
-  return d.toISOString().slice(0, 10);
-}
-const FORECAST_MONTHS = Array.from({ length: 12 }, (_, i) => forecastMonthStr(i));
+const FORECAST_YEAR = 2026;
+const FORECAST_MONTHS = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(FORECAST_YEAR, i, 1)).toISOString().slice(0, 10));
 function forecastMonthLabel(monthStr, withYear){
   const d = new Date(monthStr + "T00:00:00Z");
   return d.toLocaleDateString("en-US", withYear ? { month: "short", year: "2-digit" } : { month: "short" });
@@ -3299,12 +3302,14 @@ function buildForecastTable(){
   const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
   const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
   const rows = PROJECTS.map(p => {
-    const cells = FORECAST_MONTHS.map(m => {
+    const cells = FORECAST_MONTHS.map((m, i) => {
       const locations = forecastValue(p.id, m, "locations");
       const price = forecastValue(p.id, m, "price");
+      const isLastMonth = i === FORECAST_MONTHS.length - 1;
+      const copyBtn = isLastMonth ? "" : `<button type="button" class="forecast-copy-btn" data-copy-forecast="${p.id}" data-copy-from-month="${m}" title="Copy this month's locations &amp; price to every month after it">→</button>`;
       return `
         <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
-        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span></td>
+        <td><span class="forecast-cell-editable" data-edit-forecast="${p.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span>${copyBtn}</td>
       `;
     }).join("");
     return `
@@ -3342,6 +3347,36 @@ async function saveForecastValue(projectId, month, field, value){
   } catch (e) {
     alert("Couldn't save — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
   }
+}
+async function saveForecastPair(projectId, month, locations, price){
+  if (!forecastData[projectId]) forecastData[projectId] = {};
+  forecastData[projectId][month] = { locations, price };
+  const { error } = await supabaseClient.from("project_forecasts").upsert({
+    project_id: projectId,
+    month,
+    locations,
+    price,
+    updated_by: authSession.user.email,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "project_id,month" });
+  if (error) throw error;
+}
+async function copyForecastRight(projectId, fromMonth){
+  const fromIndex = FORECAST_MONTHS.indexOf(fromMonth);
+  if (fromIndex === -1 || fromIndex === FORECAST_MONTHS.length - 1) return;
+  const source = (forecastData[projectId] && forecastData[projectId][fromMonth]) || { locations: 0, price: 0 };
+  const targets = FORECAST_MONTHS.slice(fromIndex + 1);
+  const project = PROJECTS.find(p => p.id === projectId);
+  const confirmed = window.confirm(
+    `Copy ${source.locations} location(s) at ${formatCurrency(source.price)}/month from ${forecastMonthLabel(fromMonth, true)} to all ${targets.length} month(s) after it for ${project ? project.name : "this project"}?\n\nThis overwrites any values already entered in those months.`
+  );
+  if (!confirmed) return;
+  try {
+    await Promise.all(targets.map(m => saveForecastPair(projectId, m, source.locations, source.price)));
+  } catch (e) {
+    alert("Couldn't copy to every month: " + e.message);
+  }
+  renderForecastingContent();
 }
 function openInlineForecastEditor(el, projectId, month, field){
   const input = document.createElement("input");
@@ -5177,6 +5212,11 @@ document.addEventListener("click", (e) => {
   const editForecastEl = e.target.closest("[data-edit-forecast]");
   if (editForecastEl){
     openInlineForecastEditor(editForecastEl, editForecastEl.dataset.editForecast, editForecastEl.dataset.forecastMonth, editForecastEl.dataset.forecastField);
+    return;
+  }
+  const copyForecastBtn = e.target.closest("[data-copy-forecast]");
+  if (copyForecastBtn){
+    copyForecastRight(copyForecastBtn.dataset.copyForecast, copyForecastBtn.dataset.copyFromMonth);
     return;
   }
   const sortSimCardsEl = e.target.closest("[data-sort-key]");
