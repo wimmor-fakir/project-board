@@ -2979,9 +2979,12 @@ async function renderTeamUpdates(){
     teamUpdatePanel.innerHTML = `<p class="summary-facts">Couldn't load team updates — has supabase-team-updates.sql been run yet?</p>`;
     return;
   }
+  const myEmail = authSession.user.email;
+  const myTodayEntry = data.find(entry => entry.created_by === myEmail && (entry.update_date || entry.created_at.slice(0, 10)) === TODAY_STR) || null;
+
   teamUpdatePanel.innerHTML = `
     <div class="summary-intro">
-      <p>Updates for the team, most recent first.</p>
+      <p>${myTodayEntry ? "Updates for the team, most recent first." : "Post your update for today to see everyone else's."}</p>
       <button type="button" class="btn btn-new" id="refreshTeamUpdatesBtn">↻ Refresh</button>
     </div>
     <div class="team-update-compose">
@@ -2994,10 +2997,19 @@ async function renderTeamUpdates(){
         `).join("")}
       </div>
       <div class="modal-error" id="teamUpdateError" hidden></div>
-      <button type="button" class="btn btn-primary" id="teamUpdatePostBtn">Post update</button>
+      <button type="button" class="btn btn-primary" id="teamUpdatePostBtn">${myTodayEntry ? "Update" : "Post update"}</button>
     </div>
   `;
-  if (!data.length){
+  if (myTodayEntry){
+    TEAM_UPDATE_QUESTIONS.forEach(q => { document.getElementById("tu_" + q.key).value = myTodayEntry[q.key] || ""; });
+  }
+
+  if (!myTodayEntry){
+    const lockedMsg = document.createElement("p");
+    lockedMsg.className = "summary-facts";
+    lockedMsg.textContent = "Everyone else's updates are hidden until you post your own for today.";
+    teamUpdatePanel.appendChild(lockedMsg);
+  } else if (!data.length){
     const emptyMsg = document.createElement("p");
     emptyMsg.className = "summary-facts";
     emptyMsg.textContent = "No updates posted yet.";
