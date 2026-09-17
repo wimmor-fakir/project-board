@@ -24,10 +24,16 @@ when you open the live site** — all one-time, no-code steps:
      needs. Safe to run even if you're not sure; it does nothing if
      already applied.
 3. **Run `supabase-team-updates.sql`** too — creates the table behind the
-   Team Update page's 4-question daily check-in.
+   Team Update page's 4-question daily check-in (one row per person per
+   day; posting again the same day amends that day's entry).
    - **Already ran an earlier version of this script?** Also run
-     `supabase-migration-team-updates-questions.sql` once — it adds the
-     four question columns. Safe to run even if you're not sure.
+     `supabase-migration-team-updates-questions.sql` once (adds the four
+     question columns) and, if you'd also already had that version
+     running, `supabase-migration-team-updates-one-per-day.sql` once too
+     (enforces one row per person per day — note it deletes older
+     same-day duplicates for the same person, keeping only the latest;
+     see the comments in that file before running it). Both are safe to
+     run even if you're not sure whether they're needed.
 4. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -367,7 +373,7 @@ step 3 above to redeploy with the new value.
 |---|---|
 | Run `supabase-setup.sql` in Supabase's SQL Editor | Creates the table the app saves to and its sign-in-required security rule — nothing saves until this runs |
 | Run `supabase-activity-log.sql` too | Creates the table behind the Activity tab — without it, Activity shows an error instead of a log |
-| Run `supabase-team-updates.sql` too | Creates the table behind the Team Update page |
+| Run `supabase-team-updates.sql` too | Creates the table behind the Team Update page (one row per person per day) |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |

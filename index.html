@@ -761,7 +761,10 @@
   .activity-code-link:hover{ text-decoration:underline; }
   .activity-code-link:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
   .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
-  .team-update-answers{ display:flex; flex-direction:column; gap:10px; }
+  .team-update-answers{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+    gap:14px 18px;
+  }
   .team-update-answer .fact-value{ white-space:pre-wrap; }
   .team-update-compose{
     display:flex; flex-direction:column; gap:12px; align-items:flex-start;
@@ -2888,7 +2891,6 @@ function buildTeamUpdateRow(entry){
   const answersEl = row.querySelector(".team-update-answers");
   TEAM_UPDATE_QUESTIONS.forEach(q => {
     const value = entry[q.key];
-    if (!value) return;
     const item = document.createElement("div");
     item.className = "team-update-answer";
     const label = document.createElement("div");
@@ -2896,7 +2898,7 @@ function buildTeamUpdateRow(entry){
     label.textContent = q.label;
     const val = document.createElement("div");
     val.className = "fact-value";
-    val.textContent = value;
+    val.textContent = value || "—";
     item.appendChild(label);
     item.appendChild(val);
     answersEl.appendChild(item);
@@ -2921,10 +2923,12 @@ async function postTeamUpdate(){
   }
   postBtn.disabled = true;
   try {
-    const { error } = await supabaseClient.from("team_updates").insert({
+    const { error } = await supabaseClient.from("team_updates").upsert({
       ...answers,
       created_by: authSession.user.email,
-    });
+      update_date: TODAY_STR,
+      created_at: new Date().toISOString(),
+    }, { onConflict: "created_by,update_date" });
     if (error) throw error;
     TEAM_UPDATE_QUESTIONS.forEach(q => { document.getElementById("tu_" + q.key).value = ""; });
     renderTeamUpdates();
