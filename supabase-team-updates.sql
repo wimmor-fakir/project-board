@@ -1,10 +1,14 @@
 -- Run this once in your Supabase project's SQL Editor, in addition to
--- supabase-setup.sql. Creates the table behind the Team Update page —
--- a simple, append-only feed anyone with access to that page can post to.
+-- supabase-setup.sql. Creates the table behind the Team Update page — a
+-- daily check-in feed (how you are, whereabouts, priority, help needed)
+-- that anyone with access to the page can post to.
 
 create table if not exists team_updates (
   id bigint generated always as identity primary key,
-  text text not null,
+  how_are_you text,
+  whereabouts text,
+  priority text,
+  needs_help text,
   created_by text not null, -- the signed-in user's email
   created_at timestamptz not null default now()
 );

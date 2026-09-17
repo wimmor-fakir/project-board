@@ -761,18 +761,16 @@
   .activity-code-link:hover{ text-decoration:underline; }
   .activity-code-link:focus-visible{ outline:2px solid var(--focus); outline-offset:1px; }
   .activity-restore-btn{ font-size:11.5px; padding:4px 9px; }
-  .team-update-text{ font-size:13px; color:var(--ink); line-height:1.5; white-space:pre-wrap; }
+  .team-update-answers{ display:flex; flex-direction:column; gap:10px; }
+  .team-update-answer .fact-value{ white-space:pre-wrap; }
   .team-update-compose{
-    display:flex; flex-direction:column; gap:8px; align-items:flex-start;
+    display:flex; flex-direction:column; gap:12px; align-items:flex-start;
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:14px 16px; margin-bottom:14px;
   }
-  .team-update-compose textarea{
-    font: inherit; font-size:13px; color:var(--ink); width:100%;
-    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
-    padding:9px 11px; resize:vertical;
-  }
-  .team-update-compose textarea:focus{ outline:2px solid var(--focus); outline-offset:1px; }
+  .team-update-compose .field{ width:100%; }
+  .team-update-compose .field input{ width:100%; }
+  .field-note{ font-weight:400; color:var(--ink-3); }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -2871,6 +2869,12 @@ async function renderSimCards(){
   }
 }
 
+const TEAM_UPDATE_QUESTIONS = [
+  { key: "how_are_you", label: "How are you?", note: "This one's about you personally", placeholder: "e.g. Doing well, thanks!", required: true },
+  { key: "whereabouts", label: "What are your whereabouts today?", note: "E.g. working from home, coming in later, etc", placeholder: "e.g. Working from home", required: true },
+  { key: "priority", label: "Priority for today?", note: "", placeholder: "e.g. Finish the Ackermans proposal", required: true },
+  { key: "needs_help", label: "Do you need help with anything?", note: "Leave blank if not", placeholder: "e.g. Stuck on the recharge API", required: false },
+];
 function buildTeamUpdateRow(entry){
   const row = document.createElement("div");
   row.className = "activity-row";
@@ -2879,30 +2883,50 @@ function buildTeamUpdateRow(entry){
       <span class="activity-who">${entry.created_by}</span>
       <span class="activity-when">${formatChangeTimestamp(entry.created_at)}</span>
     </div>
-    <div class="team-update-text"></div>
+    <div class="team-update-answers"></div>
   `;
-  row.querySelector(".team-update-text").textContent = entry.text;
+  const answersEl = row.querySelector(".team-update-answers");
+  TEAM_UPDATE_QUESTIONS.forEach(q => {
+    const value = entry[q.key];
+    if (!value) return;
+    const item = document.createElement("div");
+    item.className = "team-update-answer";
+    const label = document.createElement("div");
+    label.className = "fact-label";
+    label.textContent = q.label;
+    const val = document.createElement("div");
+    val.className = "fact-value";
+    val.textContent = value;
+    item.appendChild(label);
+    item.appendChild(val);
+    answersEl.appendChild(item);
+  });
   return row;
 }
 async function postTeamUpdate(){
-  const textEl = document.getElementById("teamUpdateText");
   const errorEl = document.getElementById("teamUpdateError");
   const postBtn = document.getElementById("teamUpdatePostBtn");
   errorEl.hidden = true;
-  const text = textEl.value.trim();
-  if (!text){
-    errorEl.textContent = "Please write something before posting.";
+  const answers = {};
+  const missing = [];
+  TEAM_UPDATE_QUESTIONS.forEach(q => {
+    const value = document.getElementById("tu_" + q.key).value.trim();
+    answers[q.key] = value || null;
+    if (q.required && !value) missing.push(q.label);
+  });
+  if (missing.length){
+    errorEl.textContent = "Please answer: " + missing.join(", ");
     errorEl.hidden = false;
     return;
   }
   postBtn.disabled = true;
   try {
     const { error } = await supabaseClient.from("team_updates").insert({
-      text,
+      ...answers,
       created_by: authSession.user.email,
     });
     if (error) throw error;
-    textEl.value = "";
+    TEAM_UPDATE_QUESTIONS.forEach(q => { document.getElementById("tu_" + q.key).value = ""; });
     renderTeamUpdates();
   } catch (e) {
     errorEl.textContent = "Couldn't post — has supabase-team-updates.sql been run yet? (" + e.message + ")";
@@ -2934,7 +2958,12 @@ async function renderTeamUpdates(){
       <button type="button" class="btn btn-new" id="refreshTeamUpdatesBtn">↻ Refresh</button>
     </div>
     <div class="team-update-compose">
-      <textarea id="teamUpdateText" placeholder="Write an update for the team…" rows="3"></textarea>
+      ${TEAM_UPDATE_QUESTIONS.map(q => `
+        <label class="field">
+          <span>${q.label}${q.note ? ` <span class="field-note">(${q.note})</span>` : ""}</span>
+          <input type="text" id="tu_${q.key}" placeholder="${q.placeholder}" autocomplete="off">
+        </label>
+      `).join("")}
       <div class="modal-error" id="teamUpdateError" hidden></div>
       <button type="button" class="btn btn-primary" id="teamUpdatePostBtn">Post update</button>
     </div>

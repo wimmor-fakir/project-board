@@ -24,7 +24,10 @@ when you open the live site** — all one-time, no-code steps:
      needs. Safe to run even if you're not sure; it does nothing if
      already applied.
 3. **Run `supabase-team-updates.sql`** too — creates the table behind the
-   Team Update page.
+   Team Update page's 4-question daily check-in.
+   - **Already ran an earlier version of this script?** Also run
+     `supabase-migration-team-updates-questions.sql` once — it adds the
+     four question columns. Safe to run even if you're not sure.
 4. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
