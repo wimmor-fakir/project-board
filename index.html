@@ -938,6 +938,12 @@
   .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
   .simcard-recharge-editable{ cursor:pointer; }
   .simcard-recharge-editable:hover{ text-decoration:underline; }
+  .simcard-flag-badge{
+    display:inline-flex; align-items:center; margin-left:8px; padding:2px 7px;
+    border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.03em; background:var(--warning-soft); color:var(--warning);
+    white-space:nowrap; vertical-align:middle;
+  }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -2930,11 +2936,13 @@ function formatDateWithYear(iso){
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
-function buildSimCardRow(sim){
+function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
   const row = document.createElement("tr");
   const suspended = !!sim.suspended_at;
   const pillClass = suspended ? "blocked" : (sim.network_status === "ACTIVE" ? "on-track" : "at-risk");
   const pillLabel = suspended ? "Suspended" : (sim.network_status || "Unknown");
+  const isMostUsed = maxYesterdayUsage > 0 && (sim.yesterday_usage_mb || 0) === maxYesterdayUsage;
+  const isSoonestRunout = !!earliestRunoutDate && sim.expected_runout_date === earliestRunoutDate;
   row.innerHTML = `
     <td>
       <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
@@ -2943,8 +2951,8 @@ function buildSimCardRow(sim){
     <td><span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span></td>
     <td class="mono">${formatDataMb(sim.data_balance_mb)}</td>
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
-    <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}</td>
-    <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}</td>
+    <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}${isMostUsed ? '<span class="simcard-flag-badge" title="Most data used yesterday">Most used</span>' : ""}</td>
+    <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}${isSoonestRunout ? '<span class="simcard-flag-badge" title="Earliest expected data run-out">Soonest</span>' : ""}</td>
     <td>
       <span class="simcard-recharge-editable" data-edit-sim-recharge="${sim.msisdn}" data-value="${sim.last_recharge_date || ""}" title="Click to set the last recharge date">
         ${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}
@@ -2992,7 +3000,11 @@ function buildSimCardsTable(){
     </table>
   `;
   const tbody = wrap.querySelector("tbody");
-  sortedSimCards().forEach(sim => tbody.appendChild(buildSimCardRow(sim)));
+  const sims = sortedSimCards();
+  const maxYesterdayUsage = Math.max(0, ...sims.map(s => s.yesterday_usage_mb || 0));
+  const runoutDates = sims.map(s => s.expected_runout_date).filter(Boolean);
+  const earliestRunoutDate = runoutDates.length ? runoutDates.reduce((min, d) => d < min ? d : min) : null;
+  sims.forEach(sim => tbody.appendChild(buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate)));
   return wrap;
 }
 function renderSimCardsTableOnly(){
