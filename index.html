@@ -839,12 +839,13 @@
   }
   .forecast-top-scrollbar-inner{ height:1px; }
   .forecast-table-scroll{
-    overflow-x:auto;
+    overflow:auto;
+    max-height:60vh;
     scrollbar-width:thin;
     scrollbar-color:var(--border-strong) transparent;
   }
   .forecast-top-scrollbar::-webkit-scrollbar,
-  .forecast-table-scroll::-webkit-scrollbar{ height:8px; }
+  .forecast-table-scroll::-webkit-scrollbar{ height:8px; width:8px; }
   .forecast-top-scrollbar::-webkit-scrollbar-track,
   .forecast-table-scroll::-webkit-scrollbar-track{ background:transparent; }
   .forecast-top-scrollbar::-webkit-scrollbar-thumb,
@@ -872,7 +873,9 @@
   .forecast-table thead th{
     font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
     color:var(--ink-3); border-bottom:1px solid var(--border); text-align:center;
+    position:sticky; top:0; background:var(--surface); z-index:2;
   }
+  .forecast-table thead th.forecast-project-cell{ z-index:3; }
   .forecast-table tbody tr{ border-bottom:1px solid var(--border); }
   .forecast-table tbody tr:last-child{ border-bottom:none; }
   .forecast-table tbody tr:hover{ background:var(--surface-sunken); }
