@@ -824,20 +824,31 @@
   }
 
   /* ---------- Forecasting panel ---------- */
-  .forecast-chart-card{
+  .forecast-card{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:18px; margin-bottom:16px; position:relative;
   }
-  .forecast-chart-scroll{
+  .forecast-top-scrollbar{
+    overflow-x:auto; overflow-y:hidden; height:14px; margin-bottom:6px;
+    scrollbar-width:thin;
+    scrollbar-color:var(--border-strong) transparent;
+  }
+  .forecast-top-scrollbar-inner{ height:1px; }
+  .forecast-scroll-region{
     overflow-x:auto;
     scrollbar-width:thin;
     scrollbar-color:var(--border-strong) transparent;
   }
-  .forecast-chart-scroll::-webkit-scrollbar{ height:8px; }
-  .forecast-chart-scroll::-webkit-scrollbar-track{ background:transparent; }
-  .forecast-chart-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
-  .forecast-chart-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
-  .forecast-chart-svg{ display:block; overflow:visible; }
+  .forecast-top-scrollbar::-webkit-scrollbar,
+  .forecast-scroll-region::-webkit-scrollbar{ height:8px; }
+  .forecast-top-scrollbar::-webkit-scrollbar-track,
+  .forecast-scroll-region::-webkit-scrollbar-track{ background:transparent; }
+  .forecast-top-scrollbar::-webkit-scrollbar-thumb,
+  .forecast-scroll-region::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .forecast-top-scrollbar::-webkit-scrollbar-thumb:hover,
+  .forecast-scroll-region::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
+  .forecast-scroll-inner{ width:max-content; }
+  .forecast-chart-svg{ display:block; overflow:visible; margin-bottom:10px; }
   .forecast-axis-label{ font-size:10px; fill:var(--ink-3); font-family:inherit; }
   .forecast-bar-hit{ cursor:pointer; }
   .forecast-legend{ display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
@@ -853,16 +864,6 @@
   .forecast-tooltip-key{ width:8px; height:8px; border-radius:2px; flex:none; }
   .forecast-tooltip-name{ color:var(--ink-2); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .forecast-tooltip-value{ font-weight:700; color:var(--ink); font-family:"IBM Plex Mono",monospace; }
-  .forecast-table-wrap{
-    background:var(--surface); border:1px solid var(--border); border-radius:12px;
-    box-shadow:var(--shadow); overflow-x:auto;
-    scrollbar-width:thin;
-    scrollbar-color:var(--border-strong) transparent;
-  }
-  .forecast-table-wrap::-webkit-scrollbar{ height:8px; }
-  .forecast-table-wrap::-webkit-scrollbar-track{ background:transparent; }
-  .forecast-table-wrap::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
-  .forecast-table-wrap::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
   .forecast-table{ width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
   .forecast-table th, .forecast-table td{ padding:8px 12px; text-align:right; }
   .forecast-table thead th{
@@ -872,6 +873,7 @@
   .forecast-table tbody tr{ border-bottom:1px solid var(--border); }
   .forecast-table tbody tr:last-child{ border-bottom:none; }
   .forecast-table tbody tr:hover{ background:var(--surface-sunken); }
+  .forecast-month-divider{ border-left:1px solid var(--border); }
   .forecast-project-cell{
     text-align:left; font-weight:600; white-space:normal; min-width:160px; max-width:220px;
     position:sticky; left:0; background:var(--surface); z-index:1;
@@ -3209,7 +3211,7 @@ function projectForecastRevenue(projectId, month){
 }
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
-function buildForecastChart(){
+function buildForecastChart(totalWidth, leftGutter, cardEl, tooltipEl){
   // Rank projects by total forecasted revenue over the window; past the
   // 6th, fold into "Other" rather than generating more categorical hues.
   const totals = PROJECTS.map(p => ({
@@ -3232,18 +3234,20 @@ function buildForecastChart(){
   });
   const maxTotal = Math.max(1, ...monthData.map(m => m.total));
 
-  const card = document.createElement("div");
-  card.className = "forecast-chart-card";
-
   if (!totals.length){
-    card.innerHTML = `<p class="summary-facts">No forecasted revenue yet — add locations and a price per month below.</p>`;
-    return card;
+    const p = document.createElement("p");
+    p.className = "summary-facts";
+    p.textContent = "No forecasted revenue yet — add locations and a price per month below.";
+    return { el: p, legendHtml: "" };
   }
 
   const chartH = 200;
-  const barW = 26;
-  const gap = 18;
-  const chartW = FORECAST_MONTHS.length * (barW + gap) + gap;
+  // Size each month's bar column to match that month's table column width
+  // below, so the chart and table line up and share one scrollbar.
+  const chartW = Math.max(totalWidth - leftGutter, FORECAST_MONTHS.length * 20);
+  const perMonth = chartW / FORECAST_MONTHS.length;
+  const gap = Math.min(perMonth * 0.35, 18);
+  const barW = Math.max(perMonth - gap, 6);
   const radius = 4;
 
   // "Nice" axis ceiling and 4 gridline steps.
@@ -3261,7 +3265,7 @@ function buildForecastChart(){
 
   let bars = "";
   monthData.forEach((m, i) => {
-    const x = gap + i * (barW + gap);
+    const x = i * perMonth + gap / 2;
     let yCursor = chartH;
     m.segments.forEach((seg, si) => {
       const segH = Math.max((seg.value / axisMax) * chartH - 2, 1); // 2px surface gap between segments
@@ -3275,39 +3279,35 @@ function buildForecastChart(){
       }
       yCursor = y - 2;
     });
-    bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${x - gap / 2}" y="0" width="${barW + gap}" height="${chartH}" fill="transparent"/>`;
+    bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${i * perMonth}" y="0" width="${perMonth}" height="${chartH}" fill="transparent"/>`;
   });
 
   const labels = monthData.map((m, i) => {
-    const x = gap + i * (barW + gap) + barW / 2;
+    const x = i * perMonth + perMonth / 2;
     return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month, true)}</text>`;
   }).join("");
 
-  card.innerHTML = `
-    <div class="forecast-chart-scroll">
-      <svg viewBox="-70 -10 ${chartW + 80} ${chartH + 36}" width="${chartW + 80}" height="${chartH + 36}" class="forecast-chart-svg">
-        ${gridlines}
-        ${bars}
-        ${labels}
-      </svg>
-    </div>
-    <div class="forecast-legend">
-      ${series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")}
-    </div>
-    <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <svg viewBox="-${leftGutter} -10 ${chartW + leftGutter} ${chartH + 36}" width="${chartW + leftGutter}" height="${chartH + 36}" class="forecast-chart-svg">
+      ${gridlines}
+      ${bars}
+      ${labels}
+    </svg>
   `;
+  const el = wrap.firstElementChild;
 
-  const tooltip = card.querySelector("#forecastTooltip");
-  card.querySelectorAll("[data-forecast-bar]").forEach(hitRect => {
+  el.querySelectorAll("[data-forecast-bar]").forEach(hitRect => {
     const m = monthData[Number(hitRect.dataset.forecastBar)];
-    hitRect.addEventListener("mouseenter", (e) => showForecastTooltip(tooltip, card, hitRect, m));
-    hitRect.addEventListener("mousemove", (e) => showForecastTooltip(tooltip, card, hitRect, m));
-    hitRect.addEventListener("mouseleave", () => { tooltip.hidden = true; });
-    hitRect.addEventListener("focus", () => showForecastTooltip(tooltip, card, hitRect, m));
-    hitRect.addEventListener("blur", () => { tooltip.hidden = true; });
+    hitRect.addEventListener("mouseenter", (e) => showForecastTooltip(tooltipEl, cardEl, hitRect, m));
+    hitRect.addEventListener("mousemove", (e) => showForecastTooltip(tooltipEl, cardEl, hitRect, m));
+    hitRect.addEventListener("mouseleave", () => { tooltipEl.hidden = true; });
+    hitRect.addEventListener("focus", () => showForecastTooltip(tooltipEl, cardEl, hitRect, m));
+    hitRect.addEventListener("blur", () => { tooltipEl.hidden = true; });
   });
 
-  return card;
+  const legendHtml = series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("");
+  return { el, legendHtml };
 }
 function showForecastTooltip(tooltip, card, hitRect, monthEntry){
   if (!monthEntry.segments.length) { tooltip.hidden = true; return; }
@@ -3341,10 +3341,8 @@ function showForecastTooltip(tooltip, card, hitRect, monthEntry){
 }
 
 function buildForecastTable(){
-  const wrap = document.createElement("div");
-  wrap.className = "forecast-table-wrap";
-  const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2">${forecastMonthLabel(m, true)}</th>`).join("");
-  const subHeaders = FORECAST_MONTHS.map(() => `<th>Locations</th><th>Price</th>`).join("");
+  const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2" class="forecast-month-divider">${forecastMonthLabel(m, true)}</th>`).join("");
+  const subHeaders = FORECAST_MONTHS.map(() => `<th class="forecast-month-divider">Locations</th><th>P</th>`).join("");
   // Stable partition: projects with at least one line keep the standard
   // project order; 0-line projects sink to the bottom, in that same order.
   const orderedProjects = [
@@ -3363,7 +3361,7 @@ function buildForecastTable(){
             <button type="button" class="forecast-line-step-btn" data-add-line-project="${p.id}" title="Add a line">+</button>
           </span>
         </td>
-        ${FORECAST_MONTHS.map(() => `<td colspan="2"></td>`).join("")}
+        ${FORECAST_MONTHS.map(() => `<td colspan="2" class="forecast-month-divider"></td>`).join("")}
       </tr>
     `;
     const lineRows = lines.map(line => {
@@ -3373,7 +3371,7 @@ function buildForecastTable(){
         const isLastMonth = i === FORECAST_MONTHS.length - 1;
         const copyBtn = isLastMonth ? "" : `<button type="button" class="forecast-copy-btn" data-copy-forecast="${line.id}" data-copy-from-month="${m}" title="Copy this month's locations &amp; price to every month after it">→</button>`;
         return `
-          <td><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
+          <td class="forecast-month-divider"><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
           <td><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="price" data-value="${price}">${price ? formatCurrency(price) : "—"}</span>${copyBtn}</td>
         `;
       }).join("");
@@ -3392,6 +3390,7 @@ function buildForecastTable(){
     }).join("");
     return headerRow + lineRows;
   }).join("");
+  const wrap = document.createElement("div");
   wrap.innerHTML = `
     <table class="forecast-table">
       <thead>
@@ -3401,7 +3400,7 @@ function buildForecastTable(){
       <tbody>${rows}</tbody>
     </table>
   `;
-  return wrap;
+  return wrap.firstElementChild;
 }
 
 async function saveForecastValue(lineId, month, field, value){
@@ -3583,10 +3582,51 @@ function renderForecastingContent(){
       <p>Forecasted monthly revenue (locations × price) per project.</p>
       <button type="button" class="btn btn-new" id="refreshForecastingBtn">↻ Refresh</button>
     </div>
+    <div class="forecast-card" id="forecastCard">
+      <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
+      <div class="forecast-scroll-region" id="forecastScrollRegion">
+        <div class="forecast-scroll-inner" id="forecastScrollInner"></div>
+      </div>
+      <div class="forecast-legend" id="forecastLegend"></div>
+      <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
+    </div>
   `;
-  forecastingPanel.appendChild(buildForecastChart());
-  forecastingPanel.appendChild(buildForecastTable());
   document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
+
+  const cardEl = document.getElementById("forecastCard");
+  const scrollRegion = document.getElementById("forecastScrollRegion");
+  const scrollInner = document.getElementById("forecastScrollInner");
+  const legendEl = document.getElementById("forecastLegend");
+  const tooltipEl = document.getElementById("forecastTooltip");
+  const topScrollbar = document.getElementById("forecastTopScrollbar");
+  const topScrollbarInner = document.getElementById("forecastTopScrollbarInner");
+
+  // Build the table first and measure it, so the chart above can be sized
+  // to match its width exactly and share one (top) scrollbar with it.
+  const tableEl = buildForecastTable();
+  scrollInner.appendChild(tableEl);
+  const firstHeaderCell = tableEl.querySelector("thead tr th");
+  const leftGutter = firstHeaderCell ? firstHeaderCell.getBoundingClientRect().width : 180;
+  const tableWidth = tableEl.getBoundingClientRect().width || leftGutter;
+
+  const { el: chartEl, legendHtml } = buildForecastChart(tableWidth, leftGutter, cardEl, tooltipEl);
+  scrollInner.insertBefore(chartEl, tableEl);
+  legendEl.innerHTML = legendHtml;
+
+  topScrollbarInner.style.width = scrollInner.scrollWidth + "px";
+  let syncingScroll = false;
+  topScrollbar.addEventListener("scroll", () => {
+    if (syncingScroll) return;
+    syncingScroll = true;
+    scrollRegion.scrollLeft = topScrollbar.scrollLeft;
+    syncingScroll = false;
+  });
+  scrollRegion.addEventListener("scroll", () => {
+    if (syncingScroll) return;
+    syncingScroll = true;
+    topScrollbar.scrollLeft = scrollRegion.scrollLeft;
+    syncingScroll = false;
+  });
 }
 async function renderForecasting(){
   if (!hasPageAccess("forecasting")) return;
