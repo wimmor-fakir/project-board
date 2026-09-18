@@ -3589,6 +3589,12 @@ async function toggleForecastLineChart(lineId, included){
 }
 
 function renderForecastingContent(){
+  // Rebuilding the panel replaces the scrollable table element, which would
+  // otherwise reset it to the top-left corner on every edit — preserve it.
+  const prevTableScroll = document.getElementById("forecastTableScroll");
+  const prevScrollLeft = prevTableScroll ? prevTableScroll.scrollLeft : 0;
+  const prevScrollTop = prevTableScroll ? prevTableScroll.scrollTop : 0;
+
   forecastingPanel.innerHTML = `
     <div class="summary-intro">
       <p>Forecasted monthly revenue (locations × price) per project.</p>
@@ -3624,6 +3630,9 @@ function renderForecastingContent(){
   tableScroll.appendChild(tableEl);
 
   topScrollbarInner.style.width = tableScroll.scrollWidth + "px";
+  tableScroll.scrollLeft = prevScrollLeft;
+  tableScroll.scrollTop = prevScrollTop;
+  topScrollbar.scrollLeft = prevScrollLeft;
   let syncingScroll = false;
   topScrollbar.addEventListener("scroll", () => {
     if (syncingScroll) return;
