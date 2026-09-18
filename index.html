@@ -828,27 +828,30 @@
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:18px; margin-bottom:16px; position:relative;
   }
+  .forecast-table-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:18px;
+  }
   .forecast-top-scrollbar{
     overflow-x:auto; overflow-y:hidden; height:14px; margin-bottom:6px;
     scrollbar-width:thin;
     scrollbar-color:var(--border-strong) transparent;
   }
   .forecast-top-scrollbar-inner{ height:1px; }
-  .forecast-scroll-region{
+  .forecast-table-scroll{
     overflow-x:auto;
     scrollbar-width:thin;
     scrollbar-color:var(--border-strong) transparent;
   }
   .forecast-top-scrollbar::-webkit-scrollbar,
-  .forecast-scroll-region::-webkit-scrollbar{ height:8px; }
+  .forecast-table-scroll::-webkit-scrollbar{ height:8px; }
   .forecast-top-scrollbar::-webkit-scrollbar-track,
-  .forecast-scroll-region::-webkit-scrollbar-track{ background:transparent; }
+  .forecast-table-scroll::-webkit-scrollbar-track{ background:transparent; }
   .forecast-top-scrollbar::-webkit-scrollbar-thumb,
-  .forecast-scroll-region::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .forecast-table-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
   .forecast-top-scrollbar::-webkit-scrollbar-thumb:hover,
-  .forecast-scroll-region::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
-  .forecast-scroll-inner{ width:max-content; }
-  .forecast-chart-svg{ display:block; overflow:visible; margin-bottom:10px; }
+  .forecast-table-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
+  .forecast-chart-svg{ display:block; overflow:visible; width:100%; margin-bottom:10px; }
   .forecast-axis-label{ font-size:10px; fill:var(--ink-3); font-family:inherit; }
   .forecast-bar-hit{ cursor:pointer; }
   .forecast-legend{ display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
@@ -875,7 +878,7 @@
   .forecast-table tbody tr:hover{ background:var(--surface-sunken); }
   .forecast-month-divider{ border-left:1px solid var(--border); }
   .forecast-project-cell{
-    text-align:left; font-weight:600; white-space:normal; min-width:160px; max-width:220px;
+    text-align:left; font-weight:600; white-space:nowrap;
     position:sticky; left:0; background:var(--surface); z-index:1;
   }
   .forecast-table tbody tr:hover .forecast-project-cell{ background:var(--surface-sunken); }
@@ -3211,7 +3214,7 @@ function projectForecastRevenue(projectId, month){
 }
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
-function buildForecastChart(totalWidth, leftGutter, cardEl, tooltipEl){
+function buildForecastChart(availableWidth, cardEl, tooltipEl){
   // Rank projects by total forecasted revenue over the window; past the
   // 6th, fold into "Other" rather than generating more categorical hues.
   const totals = PROJECTS.map(p => ({
@@ -3242,9 +3245,10 @@ function buildForecastChart(totalWidth, leftGutter, cardEl, tooltipEl){
   }
 
   const chartH = 200;
-  // Size each month's bar column to match that month's table column width
-  // below, so the chart and table line up and share one scrollbar.
-  const chartW = Math.max(totalWidth - leftGutter, FORECAST_MONTHS.length * 20);
+  const leftGutter = 64;
+  // Fit all months into the visible width instead of scrolling — bars get
+  // narrower on a smaller window rather than overflowing.
+  const chartW = Math.max(availableWidth - leftGutter, FORECAST_MONTHS.length * 8);
   const perMonth = chartW / FORECAST_MONTHS.length;
   const gap = Math.min(perMonth * 0.35, 18);
   const barW = Math.max(perMonth - gap, 6);
@@ -3282,7 +3286,12 @@ function buildForecastChart(totalWidth, leftGutter, cardEl, tooltipEl){
     bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${i * perMonth}" y="0" width="${perMonth}" height="${chartH}" fill="transparent"/>`;
   });
 
+  // Thin out month labels (rather than the bars) when the window is too
+  // narrow to fit one per month without them overlapping.
+  const minLabelSpacing = 34;
+  const labelStride = Math.max(1, Math.ceil(minLabelSpacing / perMonth));
   const labels = monthData.map((m, i) => {
+    if (i % labelStride !== 0) return "";
     const x = i * perMonth + perMonth / 2;
     return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month, true)}</text>`;
   }).join("");
@@ -3583,51 +3592,55 @@ function renderForecastingContent(){
       <button type="button" class="btn btn-new" id="refreshForecastingBtn">↻ Refresh</button>
     </div>
     <div class="forecast-card" id="forecastCard">
-      <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
-      <div class="forecast-scroll-region" id="forecastScrollRegion">
-        <div class="forecast-scroll-inner" id="forecastScrollInner"></div>
-      </div>
+      <div id="forecastChartHolder"></div>
       <div class="forecast-legend" id="forecastLegend"></div>
       <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
+    </div>
+    <div class="forecast-table-card">
+      <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
+      <div class="forecast-table-scroll" id="forecastTableScroll"></div>
     </div>
   `;
   document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
 
   const cardEl = document.getElementById("forecastCard");
-  const scrollRegion = document.getElementById("forecastScrollRegion");
-  const scrollInner = document.getElementById("forecastScrollInner");
+  const chartHolder = document.getElementById("forecastChartHolder");
   const legendEl = document.getElementById("forecastLegend");
   const tooltipEl = document.getElementById("forecastTooltip");
+  const tableScroll = document.getElementById("forecastTableScroll");
   const topScrollbar = document.getElementById("forecastTopScrollbar");
   const topScrollbarInner = document.getElementById("forecastTopScrollbarInner");
 
-  // Build the table first and measure it, so the chart above can be sized
-  // to match its width exactly and share one (top) scrollbar with it.
-  const tableEl = buildForecastTable();
-  scrollInner.appendChild(tableEl);
-  const firstHeaderCell = tableEl.querySelector("thead tr th");
-  const leftGutter = firstHeaderCell ? firstHeaderCell.getBoundingClientRect().width : 180;
-  const tableWidth = tableEl.getBoundingClientRect().width || leftGutter;
-
-  const { el: chartEl, legendHtml } = buildForecastChart(tableWidth, leftGutter, cardEl, tooltipEl);
-  scrollInner.insertBefore(chartEl, tableEl);
+  // The chart fits itself to the visible width (no horizontal scroll); only
+  // the table scrolls, via a scrollbar placed above it instead of below.
+  const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl);
+  chartHolder.appendChild(chartEl);
   legendEl.innerHTML = legendHtml;
 
-  topScrollbarInner.style.width = scrollInner.scrollWidth + "px";
+  const tableEl = buildForecastTable();
+  tableScroll.appendChild(tableEl);
+
+  topScrollbarInner.style.width = tableScroll.scrollWidth + "px";
   let syncingScroll = false;
   topScrollbar.addEventListener("scroll", () => {
     if (syncingScroll) return;
     syncingScroll = true;
-    scrollRegion.scrollLeft = topScrollbar.scrollLeft;
+    tableScroll.scrollLeft = topScrollbar.scrollLeft;
     syncingScroll = false;
   });
-  scrollRegion.addEventListener("scroll", () => {
+  tableScroll.addEventListener("scroll", () => {
     if (syncingScroll) return;
     syncingScroll = true;
-    topScrollbar.scrollLeft = scrollRegion.scrollLeft;
+    topScrollbar.scrollLeft = tableScroll.scrollLeft;
     syncingScroll = false;
   });
 }
+let forecastResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (currentId !== "forecasting") return;
+  clearTimeout(forecastResizeTimer);
+  forecastResizeTimer = setTimeout(renderForecastingContent, 150);
+});
 async function renderForecasting(){
   if (!hasPageAccess("forecasting")) return;
   if (!supabaseClient || !authSession){
