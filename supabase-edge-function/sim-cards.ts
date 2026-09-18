@@ -68,6 +68,17 @@ function num(v: unknown) {
   return isNaN(n) ? 0 : n;
 }
 
+// The exact shape of a SIM's tags is unconfirmed (could be an array of
+// plain strings, or an array of {name}/{tag}/{label} objects) — handle
+// the likely spellings rather than assuming one.
+function normalizeTags(sim: any): string[] {
+  const raw = sim.tags ?? sim.tag_list ?? sim.tagList ?? [];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t: any) => (typeof t === "string" ? t : (t && (t.name || t.tag || t.label)) || ""))
+    .filter(Boolean);
+}
+
 // Trimmed/IQR mean: the standard "outside 1.5x the interquartile range"
 // boxplot rule, so one freak high- or low-usage day doesn't skew the
 // average. With fewer than 4 points there's not enough data to tell a
@@ -196,6 +207,7 @@ Deno.serve(async (req) => {
         iccid: sim.iccid,
         network_status: sim.network_status,
         suspended_at: sim.suspended_at,
+        tags: normalizeTags(sim),
         data_balance_mb: balanceMb,
         avg_daily_usage_mb: avgDailyUsageMb,
         yesterday_usage_mb: yesterdayUsageMb,

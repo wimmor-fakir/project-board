@@ -944,6 +944,13 @@
     letter-spacing:.03em; background:var(--warning-soft); color:var(--warning);
     white-space:nowrap; vertical-align:middle;
   }
+  .simcard-tags{ display:flex; flex-wrap:wrap; gap:4px; max-width:200px; white-space:normal; }
+  .simcard-tag-chip{
+    display:inline-flex; align-items:center; padding:2px 8px;
+    border-radius:999px; font-size:10.5px; font-weight:600;
+    background:var(--surface-sunken); color:var(--ink-2); border:1px solid var(--border);
+    white-space:nowrap;
+  }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -2948,6 +2955,7 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
       <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
       <div class="simcard-msisdn mono">${sim.msisdn || ""}</div>
     </td>
+    <td>${(sim.tags && sim.tags.length) ? `<div class="simcard-tags">${sim.tags.map(t => `<span class="simcard-tag-chip">${t}</span>`).join("")}</div>` : "—"}</td>
     <td><span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span></td>
     <td class="mono">${formatDataMb(sim.data_balance_mb)}</td>
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
@@ -2964,6 +2972,7 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
 
 const SIMCARD_COLUMNS = [
   { key: "name", label: "SIM", sortValue: sim => (sim.description || sim.msisdn || "").toLowerCase() },
+  { key: "tags", label: "Tags", sortValue: sim => (sim.tags && sim.tags.length ? sim.tags.join(", ") : "").toLowerCase() },
   { key: "status", label: "Status", sortValue: sim => sim.suspended_at ? "" : (sim.network_status || "") },
   { key: "balance", label: "Data balance", sortValue: sim => sim.data_balance_mb || 0 },
   { key: "avg", label: "Avg usage / day", sortValue: sim => sim.avg_daily_usage_mb || 0 },
