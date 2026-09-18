@@ -3342,7 +3342,7 @@ function showForecastTooltip(tooltip, card, hitRect, monthEntry){
 
 function buildForecastTable(){
   const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2" class="forecast-month-divider">${forecastMonthLabel(m, true)}</th>`).join("");
-  const subHeaders = FORECAST_MONTHS.map(() => `<th class="forecast-month-divider">Locations</th><th>P</th>`).join("");
+  const subHeaders = FORECAST_MONTHS.map(() => `<th class="forecast-month-divider">L</th><th>Price</th>`).join("");
   // Stable partition: projects with at least one line keep the standard
   // project order; 0-line projects sink to the bottom, in that same order.
   const orderedProjects = [
