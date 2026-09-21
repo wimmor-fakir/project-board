@@ -56,9 +56,13 @@ async function getAccessToken(clientId: string, clientSecret: string) {
       scope: "api.read_only",
     }),
   });
-  const body = await res.json().catch(() => null);
+  const rawText = await res.text();
+  // deno-lint-ignore no-explicit-any
+  let body: any = null;
+  try { body = rawText ? JSON.parse(rawText) : null; } catch (_e) { /* not JSON — rawText carries the detail below */ }
   if (!res.ok) {
-    throw new Error((body && (body.error_description || body.Message)) || `PaySpace auth failed (${res.status})`);
+    const detail = body && (body.error_description || body.Message || body.error);
+    throw new Error(`PaySpace auth failed (${res.status})${detail ? ": " + detail : rawText ? ": " + rawText.slice(0, 300) : ""}`);
   }
   return body as {
     access_token: string;
@@ -73,10 +77,13 @@ async function payspaceGet(path: string, token: string) {
       "User-Agent": USER_AGENT,
     },
   });
-  const body = await res.json().catch(() => null);
+  const rawText = await res.text();
+  // deno-lint-ignore no-explicit-any
+  let body: any = null;
+  try { body = rawText ? JSON.parse(rawText) : null; } catch (_e) { /* not JSON — rawText carries the detail below */ }
   if (!res.ok) {
     const detail = body && body.Message;
-    throw new Error(detail || `PaySpace API error (${res.status}) on ${path}`);
+    throw new Error(`PaySpace API error (${res.status}) on ${path}${detail ? ": " + detail : rawText ? ": " + rawText.slice(0, 300) : ""}`);
   }
   return body;
 }
