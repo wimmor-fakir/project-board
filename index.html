@@ -4086,23 +4086,16 @@ async function renderGoals(){
 }
 
 /* ---------- Leave ---------- */
-let leaveBalances = {}; // leaveBalances[personName] = { entitlement, applications, adjustments, payspace_employee_number }
-const LEAVE_FIELDS = [
-  { key: "entitlement", label: "Entitlement" },
-  { key: "applications", label: "Applications" },
-  { key: "adjustments", label: "Adjustments" },
-];
+const LEAVE_FLAT_ENTITLEMENT = 25; // days added to BOP for every person, every cycle
+let leaveBalances = {}; // leaveBalances[personName] = { bop, payspace_employee_number }
 // Read-only reference data pulled from PaySpace on demand (see
 // syncPayspaceLeave) — keyed by PaySpace EmployeeNumber, never written
-// back and never overwrites the manually-entered fields above.
+// back and never overwrites bop.
 let payspaceLeaveData = null; // null until a sync has run; then { [employeeNumber]: { entitlement, applications } }
 let payspaceSyncError = null;
 let payspaceSyncing = false;
-function leaveValue(name, field){
-  return (leaveBalances[name] && leaveBalances[name][field]) || 0;
-}
-function leaveBalanceFor(name){
-  return leaveValue(name, "entitlement") - leaveValue(name, "applications") + leaveValue(name, "adjustments");
+function leaveBop(name){
+  return (leaveBalances[name] && leaveBalances[name].bop) || 0;
 }
 function leavePayspaceNumber(name){
   return (leaveBalances[name] && leaveBalances[name].payspace_employee_number) || "";
@@ -4110,6 +4103,14 @@ function leavePayspaceNumber(name){
 function payspaceDataFor(name){
   const num = leavePayspaceNumber(name);
   return (num && payspaceLeaveData && payspaceLeaveData[num]) || null;
+}
+// EOP = BOP + the flat entitlement - the PaySpace Applications total for
+// the current cycle. Only computable once that PaySpace figure is known
+// (a sync has run and found data for this person's PaySpace #).
+function leaveEopFor(name){
+  const psData = payspaceDataFor(name);
+  if (!psData) return null;
+  return leaveBop(name) + LEAVE_FLAT_ENTITLEMENT - psData.applications;
 }
 function formatLeaveDays(n){
   const rounded = Math.round(n * 100) / 100;
@@ -4133,17 +4134,15 @@ function buildApplicationDetailsHtml(psData){
 }
 function buildLeaveTable(){
   const rows = PEOPLE_ORDER.map(name => {
-    const cells = LEAVE_FIELDS.map(f => `
-      <td><span class="leave-cell-editable" data-edit-leave="${name}" data-leave-field="${f.key}" data-value="${leaveValue(name, f.key)}">${leaveValue(name, f.key)}</span></td>
-    `).join("");
     const psNumber = leavePayspaceNumber(name);
     const psData = payspaceDataFor(name);
+    const eop = leaveEopFor(name);
     return `
       <tr>
         <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
         <td><span class="leave-cell-editable leave-payspace-number" data-edit-leave-payspace-number="${name}" data-value="${psNumber}" title="Click to set this person's PaySpace Employee Number">${psNumber || "+ Add"}</span></td>
-        ${cells}
-        <td class="mono leave-balance-cell">${formatLeaveDays(leaveBalanceFor(name))}</td>
+        <td><span class="leave-cell-editable" data-edit-leave-bop="${name}" data-value="${leaveBop(name)}" title="Click to edit this person's Balance at start Of Period">${leaveBop(name)}</span></td>
+        <td class="mono leave-balance-cell" title="${psData ? "" : "Sync from PaySpace to compute — needs the PaySpace Applications total for this person"}">${eop === null ? "—" : formatLeaveDays(eop)}</td>
         <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.entitlement) : "—"}</td>
         <td class="leave-payspace-cell leave-payspace-applications-cell">${buildApplicationDetailsHtml(psData)}</td>
       </tr>`;
@@ -4159,8 +4158,8 @@ function buildLeaveTable(){
         <tr>
           <th class="leave-person-cell">Person</th>
           <th>PaySpace #</th>
-          ${LEAVE_FIELDS.map(f => `<th>${f.label}</th>`).join("")}
-          <th>Balance</th>
+          <th>BOP</th>
+          <th>EOP</th>
           <th>PaySpace Entitlement</th>
           <th>PaySpace Applications (1 May '26 – 30 Apr '27)</th>
         </tr>
@@ -4170,23 +4169,23 @@ function buildLeaveTable(){
   `;
   return wrap.firstElementChild;
 }
-async function saveLeaveValue(name, field, value){
-  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0, payspace_employee_number: "" };
-  leaveBalances[name][field] = value;
+async function saveLeaveBop(name, value){
+  if (!leaveBalances[name]) leaveBalances[name] = { bop: 0, payspace_employee_number: "" };
+  leaveBalances[name].bop = value;
   try {
     const { error } = await supabaseClient.from("leave_balances").upsert({
       person_name: name,
-      [field]: value,
+      bop: value,
       updated_by: authSession.user.email,
       updated_at: new Date().toISOString(),
     }, { onConflict: "person_name" });
     if (error) throw error;
   } catch (e) {
-    alert("Couldn't save — has supabase-leave.sql been run yet? (" + e.message + ")");
+    alert("Couldn't save — has supabase-migration-leave-bop.sql been run yet? (" + e.message + ")");
   }
 }
 async function saveLeavePayspaceNumber(name, value){
-  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0, payspace_employee_number: "" };
+  if (!leaveBalances[name]) leaveBalances[name] = { bop: 0, payspace_employee_number: "" };
   leaveBalances[name].payspace_employee_number = value;
   try {
     const { error } = await supabaseClient.from("leave_balances").upsert({
@@ -4200,7 +4199,7 @@ async function saveLeavePayspaceNumber(name, value){
     alert("Couldn't save — has supabase-migration-leave-payspace-number.sql been run yet? (" + e.message + ")");
   }
 }
-function openInlineLeaveEditor(el, name, field){
+function openInlineLeaveBopEditor(el, name){
   const input = document.createElement("input");
   input.type = "number";
   input.step = "0.5";
@@ -4216,7 +4215,7 @@ function openInlineLeaveEditor(el, name, field){
     const parsed = parseFloat(input.value);
     const value = isNaN(parsed) ? 0 : parsed;
     if (value !== parseFloat(el.dataset.value || "0")){
-      await saveLeaveValue(name, field, value);
+      await saveLeaveBop(name, value);
     }
     renderLeaveContent();
   };
@@ -4273,12 +4272,12 @@ async function syncPayspaceLeave(){
 function renderLeaveContent(){
   leavePanel.innerHTML = `
     <div class="summary-intro">
-      <p>Leave entitlements, applications, and adjustments per person. Balance = entitlement − applications + adjustments.</p>
+      <p>BOP (Balance at start Of Period) per person. EOP = BOP + ${LEAVE_FLAT_ENTITLEMENT} − PaySpace Applications for the current cycle.</p>
       <button type="button" class="btn btn-new" id="refreshLeaveBtn">↻ Refresh</button>
     </div>
     <div class="leave-payspace-bar">
       <button type="button" class="btn btn-secondary" id="syncPayspaceBtn" ${payspaceSyncing ? "disabled" : ""}>${payspaceSyncing ? "Syncing…" : "⇅ Sync from PaySpace"}</button>
-      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications (1 May 2026 – 30 Apr 2027 only) for comparison — read-only, never overwrites the fields you edit here. Click a PaySpace Applications number to see the individual dates. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so this can come back blank for others.</span>
+      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications (1 May 2026 – 30 Apr 2027 only) — EOP needs that Applications figure, so it shows "—" until synced. Click a PaySpace Applications number to see the individual dates. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so that column can come back blank for others.</span>
       ${payspaceSyncError ? `<p class="modal-error">Couldn't sync from PaySpace: ${payspaceSyncError} — has the payspace Edge Function been deployed, and are PAYSPACE_CLIENT_ID/PAYSPACE_CLIENT_SECRET set?</p>` : ""}
     </div>
     <div class="leave-table-card">
@@ -4299,15 +4298,13 @@ async function renderLeave(){
   const { data, error } = await supabaseClient.from("leave_balances").select("*");
   if (currentId !== "leave") return; // user navigated away while this was loading
   if (error){
-    leavePanel.innerHTML = `<p class="summary-facts">Couldn't load leave data — has supabase-leave.sql been run yet?</p>`;
+    leavePanel.innerHTML = `<p class="summary-facts">Couldn't load leave data — has supabase-migration-leave-bop.sql been run yet?</p>`;
     return;
   }
   leaveBalances = {};
   (data || []).forEach(row => {
     leaveBalances[row.person_name] = {
-      entitlement: Number(row.entitlement),
-      applications: Number(row.applications),
-      adjustments: Number(row.adjustments),
+      bop: Number(row.bop),
       payspace_employee_number: row.payspace_employee_number || "",
     };
   });
@@ -6136,9 +6133,9 @@ document.addEventListener("click", (e) => {
     toggleGoalsOwnerFilter(goalsOwnerFilterBtn.dataset.value);
     return;
   }
-  const editLeaveEl = e.target.closest("[data-edit-leave]");
-  if (editLeaveEl){
-    openInlineLeaveEditor(editLeaveEl, editLeaveEl.dataset.editLeave, editLeaveEl.dataset.leaveField);
+  const editLeaveBopEl = e.target.closest("[data-edit-leave-bop]");
+  if (editLeaveBopEl){
+    openInlineLeaveBopEditor(editLeaveBopEl, editLeaveBopEl.dataset.editLeaveBop);
     return;
   }
   const editLeavePayspaceNumberEl = e.target.closest("[data-edit-leave-payspace-number]");

@@ -1,21 +1,19 @@
 -- Run this once in your Supabase project's SQL Editor, in addition to
 -- supabase-setup.sql. Creates the table behind the Leave page.
 --
--- One row per person: their leave entitlement (days allocated),
--- applications (days applied for/taken), and adjustments (a manual
--- correction, positive or negative). The page computes a running
--- balance (entitlement - applications + adjustments) from these —
--- nothing here stores that derived total.
+-- One row per person: bop is their manually-entered Balance at start Of
+-- Period. The page computes EOP (End of Period) as
+-- bop + 25 - <PaySpace Applications for the current cycle> — nothing
+-- here stores that derived total.
 --
 -- payspace_employee_number is the one-time mapping to that person's
--- PaySpace EmployeeNumber, used to show read-only PaySpace figures
--- alongside these manually-entered ones (see the payspace Edge Function).
+-- PaySpace EmployeeNumber, used both for that EOP calculation and to
+-- show read-only PaySpace figures alongside bop (see the payspace Edge
+-- Function).
 
 create table if not exists leave_balances (
   person_name text primary key,
-  entitlement numeric not null default 0,
-  applications numeric not null default 0,
-  adjustments numeric not null default 0,
+  bop numeric not null default 0,
   payspace_employee_number text,
   updated_by text,
   updated_at timestamptz not null default now()

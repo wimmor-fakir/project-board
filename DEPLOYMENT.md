@@ -57,13 +57,20 @@ when you open the live site** — all one-time, no-code steps:
    "date for next goals" (the same date applies to every project, editable
    at the top of the page).
 6. **Run `supabase-leave.sql`** too — creates the table behind the Leave
-   page (one row per person: entitlement, applications, and adjustments;
-   the page computes a running balance from those three).
+   page (one row per person: BOP — Balance at start Of Period, entered
+   manually — plus their PaySpace Employee Number mapping. The page
+   computes EOP as BOP + 25 − PaySpace Applications for the current
+   cycle).
    - **Already ran an earlier version of this script** (from before the
      PaySpace Employee Number mapping existed)? Run
      `supabase-migration-leave-payspace-number.sql` once — it just adds
      that column. Safe to run even if you're not sure; it does nothing if
      already applied.
+   - **Already ran an earlier version with entitlement/applications/
+     adjustments columns instead of BOP?** Run
+     `supabase-migration-leave-bop.sql` once — it adds the `bop` column
+     without touching your old data (that old data just stops being
+     read/written by the app).
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -457,8 +464,9 @@ typed.
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
-| Run `supabase-leave.sql` too | Creates the table behind the Leave page (entitlement, applications, adjustments, PaySpace # per person) |
+| Run `supabase-leave.sql` too | Creates the table behind the Leave page (BOP + PaySpace # per person; EOP = BOP + 25 − PaySpace Applications) |
 | Already had an earlier version without the PaySpace # column? Run `supabase-migration-leave-payspace-number.sql` once | Adds that column |
+| Already had an earlier version with entitlement/applications/adjustments instead of BOP? Run `supabase-migration-leave-bop.sql` once | Adds the `bop` column — old data is kept, just no longer read/written |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
