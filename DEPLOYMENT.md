@@ -8,7 +8,7 @@ C: drive and hosting it as a real website, with Supabase as the database.
 `index.html` now talks to Supabase directly (instead of Claude's Artifact
 database), requires sign-in before showing the board (matching the access
 decision in Part 4), and logs who changes each action item to an
-Activity tab. **Six things still need doing before it actually works
+Activity tab. **Seven things still need doing before it actually works
 when you open the live site** — all one-time, no-code steps:
 
 1. **Run `supabase-setup.sql`** — open it, copy its contents, paste into
@@ -56,15 +56,18 @@ when you open the live site** — all one-time, no-code steps:
    page. Every project can have up to 3 goals, all set for one shared
    "date for next goals" (the same date applies to every project, editable
    at the top of the page).
-6. **Create at least one user account for yourself** — see Part 4 below
+6. **Run `supabase-leave.sql`** too — creates the table behind the Leave
+   page (one row per person: entitlement, applications, and adjustments;
+   the page computes a running balance from those three).
+7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
-7. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
+8. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
    powers the Settings page's "User management" section (invite/remove
    people, and who can see Settings/Activity/SIM Cards/Team Update/
    Forecasting/Goals/Leave); everything else works without it.
 
-Once the first six are done, push the code (see Part 1) and the live
+Once the first seven are done, push the code (see Part 1) and the live
 site will save, sync, and log activity for real, for anyone you've
 created an account for. Part 5 (Edge Function) is separate and only
 needed for in-app invite/remove/page-access.
@@ -438,6 +441,7 @@ never a table, and never `index.html`.
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
+| Run `supabase-leave.sql` too | Creates the table behind the Leave page (entitlement, applications, adjustments per person) |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |

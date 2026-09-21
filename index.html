@@ -984,6 +984,41 @@
     padding:4px 8px;
   }
 
+  /* ---------- Leave panel ---------- */
+  .leave-table-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:18px;
+  }
+  .leave-table-scroll{
+    overflow:auto; max-height:60vh;
+    scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent;
+  }
+  .leave-table-scroll::-webkit-scrollbar{ height:8px; width:8px; }
+  .leave-table-scroll::-webkit-scrollbar-track{ background:transparent; }
+  .leave-table-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .leave-table-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
+  .leave-table{ width:100%; border-collapse:collapse; font-size:12.5px; white-space:nowrap; }
+  .leave-table th, .leave-table td{ padding:10px 14px; text-align:right; }
+  .leave-table thead th{
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ink-3); border-bottom:1px solid var(--border); text-align:right;
+    position:sticky; top:0; background:var(--surface); z-index:2;
+  }
+  .leave-table thead th.leave-person-cell{ z-index:3; }
+  .leave-table tbody tr{ border-bottom:1px solid var(--border); }
+  .leave-table tbody tr:last-child{ border-bottom:none; }
+  .leave-table tbody tr:hover{ background:var(--surface-sunken); }
+  .leave-person-cell{
+    text-align:left; font-weight:600; display:flex; align-items:center; gap:10px;
+    position:sticky; left:0; background:var(--surface); z-index:1;
+  }
+  .leave-table thead th.leave-person-cell{ display:table-cell; }
+  .leave-table tbody tr:hover .leave-person-cell{ background:var(--surface-sunken); }
+  .leave-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
+  .leave-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
+  .leave-cell-input{ width:80px; text-align:right; }
+  .leave-balance-cell{ font-weight:700; }
+
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
@@ -4029,21 +4064,134 @@ async function renderGoals(){
 }
 
 /* ---------- Leave ---------- */
-// Placeholder page — the real leave-tracking UI (likely backed by the
-// PaySpace API) isn't built yet; see DEPLOYMENT.md for how to store the
-// PaySpace client_id/client_secret needed for that later.
-function renderLeave(){
+// Manually-tracked for now — see DEPLOYMENT.md Part 7 for how the
+// PaySpace client_id/client_secret are stashed for a future integration
+// that could feed entitlements/applications in here automatically.
+let leaveBalances = {}; // leaveBalances[personName] = { entitlement, applications, adjustments }
+const LEAVE_FIELDS = [
+  { key: "entitlement", label: "Entitlement" },
+  { key: "applications", label: "Applications" },
+  { key: "adjustments", label: "Adjustments" },
+];
+function leaveValue(name, field){
+  return (leaveBalances[name] && leaveBalances[name][field]) || 0;
+}
+function leaveBalanceFor(name){
+  return leaveValue(name, "entitlement") - leaveValue(name, "applications") + leaveValue(name, "adjustments");
+}
+function formatLeaveDays(n){
+  const rounded = Math.round(n * 100) / 100;
+  return (rounded > 0 ? "+" : "") + rounded;
+}
+function buildLeaveTable(){
+  const rows = PEOPLE_ORDER.map(name => {
+    const cells = LEAVE_FIELDS.map(f => `
+      <td><span class="leave-cell-editable" data-edit-leave="${name}" data-leave-field="${f.key}" data-value="${leaveValue(name, f.key)}">${leaveValue(name, f.key)}</span></td>
+    `).join("");
+    return `
+      <tr>
+        <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
+        ${cells}
+        <td class="mono leave-balance-cell">${formatLeaveDays(leaveBalanceFor(name))}</td>
+      </tr>`;
+  }).join("");
+  const wrap = document.createElement("div");
+  if (!PEOPLE_ORDER.length){
+    wrap.innerHTML = `<p class="summary-facts">No people yet — add someone via an action item or the Owner picker first.</p>`;
+    return wrap.firstElementChild;
+  }
+  wrap.innerHTML = `
+    <table class="leave-table">
+      <thead>
+        <tr>
+          <th class="leave-person-cell">Person</th>
+          ${LEAVE_FIELDS.map(f => `<th>${f.label}</th>`).join("")}
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  return wrap.firstElementChild;
+}
+async function saveLeaveValue(name, field, value){
+  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0 };
+  leaveBalances[name][field] = value;
+  try {
+    const { error } = await supabaseClient.from("leave_balances").upsert({
+      person_name: name,
+      [field]: value,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "person_name" });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save — has supabase-leave.sql been run yet? (" + e.message + ")");
+  }
+}
+function openInlineLeaveEditor(el, name, field){
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "0.5";
+  input.className = "inline-date-input leave-cell-input";
+  input.value = el.dataset.value || "0";
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const parsed = parseFloat(input.value);
+    const value = isNaN(parsed) ? 0 : parsed;
+    if (value !== parseFloat(el.dataset.value || "0")){
+      await saveLeaveValue(name, field, value);
+    }
+    renderLeaveContent();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderLeaveContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+function renderLeaveContent(){
+  leavePanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Leave entitlements, applications, and adjustments per person. Balance = entitlement − applications + adjustments.</p>
+      <button type="button" class="btn btn-new" id="refreshLeaveBtn">↻ Refresh</button>
+    </div>
+    <div class="leave-table-card">
+      <div class="leave-table-scroll" id="leaveTableScroll"></div>
+    </div>
+  `;
+  document.getElementById("refreshLeaveBtn").addEventListener("click", renderLeave);
+  document.getElementById("leaveTableScroll").appendChild(buildLeaveTable());
+}
+async function renderLeave(){
   if (!hasPageAccess("leave")) return;
   if (!supabaseClient || !authSession){
     leavePanel.innerHTML = `<p class="summary-facts">Sign in to see leave.</p>`;
     return;
   }
-  leavePanel.innerHTML = `
-    <div class="summary-intro">
-      <p>Leave tracking is coming soon.</p>
-    </div>
-    <p class="summary-facts">Nothing here yet — this page is reserved for upcoming leave tracking.</p>
-  `;
+  leavePanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const { data, error } = await supabaseClient.from("leave_balances").select("*");
+  if (currentId !== "leave") return; // user navigated away while this was loading
+  if (error){
+    leavePanel.innerHTML = `<p class="summary-facts">Couldn't load leave data — has supabase-leave.sql been run yet?</p>`;
+    return;
+  }
+  leaveBalances = {};
+  (data || []).forEach(row => {
+    leaveBalances[row.person_name] = {
+      entitlement: Number(row.entitlement),
+      applications: Number(row.applications),
+      adjustments: Number(row.adjustments),
+    };
+  });
+  renderLeaveContent();
 }
 
 function renderSettings(){
@@ -5866,6 +6014,11 @@ document.addEventListener("click", (e) => {
   const goalsOwnerFilterBtn = e.target.closest("[data-goals-owner-filter]");
   if (goalsOwnerFilterBtn){
     toggleGoalsOwnerFilter(goalsOwnerFilterBtn.dataset.value);
+    return;
+  }
+  const editLeaveEl = e.target.closest("[data-edit-leave]");
+  if (editLeaveEl){
+    openInlineLeaveEditor(editLeaveEl, editLeaveEl.dataset.editLeave, editLeaveEl.dataset.leaveField);
     return;
   }
   const addLineBtn = e.target.closest("[data-add-line-project]");
