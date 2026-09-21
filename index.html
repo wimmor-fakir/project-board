@@ -1018,6 +1018,13 @@
   .leave-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
   .leave-cell-input{ width:80px; text-align:right; }
   .leave-balance-cell{ font-weight:700; }
+  .leave-payspace-number{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; }
+  .leave-payspace-cell{ color:var(--ink-3); }
+  .leave-payspace-bar{
+    display:flex; align-items:center; flex-wrap:wrap; gap:10px 14px; margin-bottom:16px;
+  }
+  .leave-payspace-bar .field-hint{ flex:1; min-width:260px; margin:0; }
+  .leave-payspace-bar .modal-error{ flex-basis:100%; }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -4064,35 +4071,53 @@ async function renderGoals(){
 }
 
 /* ---------- Leave ---------- */
-// Manually-tracked for now — see DEPLOYMENT.md Part 7 for how the
-// PaySpace client_id/client_secret are stashed for a future integration
-// that could feed entitlements/applications in here automatically.
-let leaveBalances = {}; // leaveBalances[personName] = { entitlement, applications, adjustments }
+let leaveBalances = {}; // leaveBalances[personName] = { entitlement, applications, adjustments, payspace_employee_number }
 const LEAVE_FIELDS = [
   { key: "entitlement", label: "Entitlement" },
   { key: "applications", label: "Applications" },
   { key: "adjustments", label: "Adjustments" },
 ];
+// Read-only reference data pulled from PaySpace on demand (see
+// syncPayspaceLeave) — keyed by PaySpace EmployeeNumber, never written
+// back and never overwrites the manually-entered fields above.
+let payspaceLeaveData = null; // null until a sync has run; then { [employeeNumber]: { entitlement, applications } }
+let payspaceSyncError = null;
+let payspaceSyncing = false;
 function leaveValue(name, field){
   return (leaveBalances[name] && leaveBalances[name][field]) || 0;
 }
 function leaveBalanceFor(name){
   return leaveValue(name, "entitlement") - leaveValue(name, "applications") + leaveValue(name, "adjustments");
 }
+function leavePayspaceNumber(name){
+  return (leaveBalances[name] && leaveBalances[name].payspace_employee_number) || "";
+}
+function payspaceDataFor(name){
+  const num = leavePayspaceNumber(name);
+  return (num && payspaceLeaveData && payspaceLeaveData[num]) || null;
+}
 function formatLeaveDays(n){
   const rounded = Math.round(n * 100) / 100;
   return (rounded > 0 ? "+" : "") + rounded;
+}
+function formatPayspaceDays(n){
+  return Math.round(n * 100) / 100;
 }
 function buildLeaveTable(){
   const rows = PEOPLE_ORDER.map(name => {
     const cells = LEAVE_FIELDS.map(f => `
       <td><span class="leave-cell-editable" data-edit-leave="${name}" data-leave-field="${f.key}" data-value="${leaveValue(name, f.key)}">${leaveValue(name, f.key)}</span></td>
     `).join("");
+    const psNumber = leavePayspaceNumber(name);
+    const psData = payspaceDataFor(name);
     return `
       <tr>
         <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
+        <td><span class="leave-cell-editable leave-payspace-number" data-edit-leave-payspace-number="${name}" data-value="${psNumber}" title="Click to set this person's PaySpace Employee Number">${psNumber || "+ Add"}</span></td>
         ${cells}
         <td class="mono leave-balance-cell">${formatLeaveDays(leaveBalanceFor(name))}</td>
+        <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.entitlement) : "—"}</td>
+        <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.applications) : "—"}</td>
       </tr>`;
   }).join("");
   const wrap = document.createElement("div");
@@ -4105,8 +4130,11 @@ function buildLeaveTable(){
       <thead>
         <tr>
           <th class="leave-person-cell">Person</th>
+          <th>PaySpace #</th>
           ${LEAVE_FIELDS.map(f => `<th>${f.label}</th>`).join("")}
           <th>Balance</th>
+          <th>PaySpace Entitlement</th>
+          <th>PaySpace Applications</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -4115,7 +4143,7 @@ function buildLeaveTable(){
   return wrap.firstElementChild;
 }
 async function saveLeaveValue(name, field, value){
-  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0 };
+  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0, payspace_employee_number: "" };
   leaveBalances[name][field] = value;
   try {
     const { error } = await supabaseClient.from("leave_balances").upsert({
@@ -4127,6 +4155,21 @@ async function saveLeaveValue(name, field, value){
     if (error) throw error;
   } catch (e) {
     alert("Couldn't save — has supabase-leave.sql been run yet? (" + e.message + ")");
+  }
+}
+async function saveLeavePayspaceNumber(name, value){
+  if (!leaveBalances[name]) leaveBalances[name] = { entitlement: 0, applications: 0, adjustments: 0, payspace_employee_number: "" };
+  leaveBalances[name].payspace_employee_number = value;
+  try {
+    const { error } = await supabaseClient.from("leave_balances").upsert({
+      person_name: name,
+      payspace_employee_number: value,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "person_name" });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save — has supabase-migration-leave-payspace-number.sql been run yet? (" + e.message + ")");
   }
 }
 function openInlineLeaveEditor(el, name, field){
@@ -4157,17 +4200,65 @@ function openInlineLeaveEditor(el, name, field){
     else if (e.key === "Enter"){ commit(); }
   });
 }
+function openInlineLeavePayspaceNumberEditor(el, name){
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "e.g. EMP014";
+  input.className = "inline-date-input leave-cell-input";
+  input.value = el.dataset.value || "";
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const trimmed = input.value.trim();
+    if (trimmed !== (el.dataset.value || "")){
+      await saveLeavePayspaceNumber(name, trimmed);
+    }
+    renderLeaveContent();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderLeaveContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+async function syncPayspaceLeave(){
+  payspaceSyncing = true;
+  payspaceSyncError = null;
+  renderLeaveContent();
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("payspace", { body: {} });
+    if (error) throw new Error(await describeFunctionError(error));
+    if (data && data.error) throw new Error(data.error);
+    payspaceLeaveData = (data && data.employees) || {};
+  } catch (e) {
+    payspaceSyncError = e.message;
+  }
+  payspaceSyncing = false;
+  renderLeaveContent();
+}
 function renderLeaveContent(){
   leavePanel.innerHTML = `
     <div class="summary-intro">
       <p>Leave entitlements, applications, and adjustments per person. Balance = entitlement − applications + adjustments.</p>
       <button type="button" class="btn btn-new" id="refreshLeaveBtn">↻ Refresh</button>
     </div>
+    <div class="leave-payspace-bar">
+      <button type="button" class="btn btn-secondary" id="syncPayspaceBtn" ${payspaceSyncing ? "disabled" : ""}>${payspaceSyncing ? "Syncing…" : "⇅ Sync from PaySpace"}</button>
+      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications for comparison — read-only, never overwrites the fields you edit here. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so this can come back blank for others.</span>
+      ${payspaceSyncError ? `<p class="modal-error">Couldn't sync from PaySpace: ${payspaceSyncError} — has the payspace Edge Function been deployed, and are PAYSPACE_CLIENT_ID/PAYSPACE_CLIENT_SECRET set?</p>` : ""}
+    </div>
     <div class="leave-table-card">
       <div class="leave-table-scroll" id="leaveTableScroll"></div>
     </div>
   `;
   document.getElementById("refreshLeaveBtn").addEventListener("click", renderLeave);
+  document.getElementById("syncPayspaceBtn").addEventListener("click", syncPayspaceLeave);
   document.getElementById("leaveTableScroll").appendChild(buildLeaveTable());
 }
 async function renderLeave(){
@@ -4189,6 +4280,7 @@ async function renderLeave(){
       entitlement: Number(row.entitlement),
       applications: Number(row.applications),
       adjustments: Number(row.adjustments),
+      payspace_employee_number: row.payspace_employee_number || "",
     };
   });
   renderLeaveContent();
@@ -6019,6 +6111,11 @@ document.addEventListener("click", (e) => {
   const editLeaveEl = e.target.closest("[data-edit-leave]");
   if (editLeaveEl){
     openInlineLeaveEditor(editLeaveEl, editLeaveEl.dataset.editLeave, editLeaveEl.dataset.leaveField);
+    return;
+  }
+  const editLeavePayspaceNumberEl = e.target.closest("[data-edit-leave-payspace-number]");
+  if (editLeavePayspaceNumberEl){
+    openInlineLeavePayspaceNumberEditor(editLeavePayspaceNumberEl, editLeavePayspaceNumberEl.dataset.editLeavePayspaceNumber);
     return;
   }
   const addLineBtn = e.target.closest("[data-add-line-project]");

@@ -59,6 +59,11 @@ when you open the live site** — all one-time, no-code steps:
 6. **Run `supabase-leave.sql`** too — creates the table behind the Leave
    page (one row per person: entitlement, applications, and adjustments;
    the page computes a running balance from those three).
+   - **Already ran an earlier version of this script** (from before the
+     PaySpace Employee Number mapping existed)? Run
+     `supabase-migration-leave-payspace-number.sql` once — it just adds
+     that column. Safe to run even if you're not sure; it does nothing if
+     already applied.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -385,41 +390,52 @@ step 3 above to redeploy with the new value.
 
 ---
 
-## Part 7 — Store your PaySpace API credentials (for later)
+## Part 7 — Deploy the PaySpace Edge Function
 
-The **Leave** tab in the rail is just a placeholder for now — nothing
-reads these credentials yet. This step only stashes your
-[PaySpace](https://developer.payspace.com/#api-urls) `client_id` and
-`client_secret` somewhere secure ahead of time, so they're ready
-whenever the actual leave-tracking integration gets built.
+The Leave page can show read-only PaySpace figures (Annual leave
+entitlement and approved applications) alongside the numbers you enter
+manually, once each person's PaySpace Employee Number is set and you
+click **Sync from PaySpace**. This never writes anything back to
+PaySpace, and never overwrites your manually-entered fields.
 
-**Why not a database table:** every table in this app's database is
-readable by any signed-in user (page-access checkboxes only hide tabs
-in the browser — they're not a real security boundary; see the note
-in Part 5). A PaySpace `client_secret` is a real credential that can
-pull your company's payroll/HR data, so it needs the same treatment as
-the SIMcontrol key and the service_role key above: a Supabase Edge
-Function secret, which only server-side function code can ever read —
-never a table, and never `index.html`.
+**Why this needs an Edge Function:** every table in this app's database
+is readable by any signed-in user (page-access checkboxes only hide
+tabs in the browser — they're not a real security boundary). A PaySpace
+`client_secret` is a real credential that can pull your company's
+payroll/HR data, so it needs the same treatment as the SIMcontrol key
+and the service_role key above: a Supabase Edge Function secret, which
+only server-side function code can ever read — never a table, and
+never `index.html`.
 
-1. In your Supabase project, go to **Edge Functions → Manage secrets**
-   (this is project-wide, so you don't need a `payspace` function to
-   exist yet — the CLI works too: `supabase secrets set`).
-2. Add two secrets:
+1. In your Supabase project, go to **Edge Functions** (left sidebar).
+2. Click **Deploy a new function** and name it exactly `payspace` (the
+   app calls it by this name).
+3. Open `supabase-edge-function/payspace.ts` from this project folder,
+   select all, copy it, and paste it into the function's code editor,
+   replacing whatever template code is there. Click **Deploy**.
+4. Open the `payspace` function's **Secrets** settings (or **Edge
+   Functions → Manage secrets** if your plan doesn't expose a
+   per-function UI, or via the CLI: `supabase secrets set`) and add:
    - `PAYSPACE_CLIENT_ID` = your PaySpace API client ID
    - `PAYSPACE_CLIENT_SECRET` = your PaySpace API client secret
-   (Find both in your PaySpace account under its API/integration
-   settings — see the [API docs](https://developer.payspace.com/#api-urls)
-   for where PaySpace surfaces them.)
-3. That's it for now. When you're ready to build the actual Leave page
-   against PaySpace's API, a new Edge Function (e.g. `payspace`) reads
-   these two with `Deno.env.get("PAYSPACE_CLIENT_ID")` /
-   `Deno.env.get("PAYSPACE_CLIENT_SECRET")`, exactly like `sim-cards.ts`
-   reads `SIMCONTROL_API_KEY` above — ask for that whenever you want it
-   built.
+   (Find both in PaySpace under **Config → Basic Settings → General
+   Company → Integrations → API Credentials**. The secret is shown only
+   once, right after you save — copy it immediately.)
+   - `PAYSPACE_COMPANY_ID` — only needed if your PaySpace account has
+     more than one company; otherwise the function picks the first one
+     automatically from the token response.
+5. On the Leave page, click each person's "+ Add" under **PaySpace #**
+   and enter their PaySpace Employee Number (find these in PaySpace's
+   employee list) — this is a one-time mapping stored per person.
+6. Test it: click **Sync from PaySpace**. You should see PaySpace
+   Entitlement/Applications figures for anyone with a PaySpace # set
+   (some may stay blank — see the note on the page about PaySpace only
+   reporting entitlement for "Employee Defined" leave schemes; that's a
+   PaySpace-side limitation, not a bug).
 
-**Never paste either value into `index.html`, a commit, or this chat**
-— Supabase's secrets UI is the only place they should ever be typed.
+**Never paste either credential into `index.html`, a commit, or this
+chat** — Supabase's secrets UI is the only place they should ever be
+typed.
 
 ---
 
@@ -441,12 +457,13 @@ never a table, and never `index.html`.
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
-| Run `supabase-leave.sql` too | Creates the table behind the Leave page (entitlement, applications, adjustments per person) |
+| Run `supabase-leave.sql` too | Creates the table behind the Leave page (entitlement, applications, adjustments, PaySpace # per person) |
+| Already had an earlier version without the PaySpace # column? Run `supabase-migration-leave-payspace-number.sql` once | Adds that column |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
 | Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
-| Set `PAYSPACE_CLIENT_ID` / `PAYSPACE_CLIENT_SECRET` as Supabase secrets (Part 7, optional) | Stashes PaySpace API credentials securely ahead of the future Leave-page integration — nothing reads them yet |
+| Deploy `payspace` and set `PAYSPACE_CLIENT_ID` / `PAYSPACE_CLIENT_SECRET` (Part 7, optional) | Powers the Leave page's "Sync from PaySpace" read-only comparison columns — everything else on that page works without this one |
 
 ## Making future changes
 

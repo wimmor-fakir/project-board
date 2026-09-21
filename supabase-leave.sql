@@ -6,12 +6,17 @@
 -- correction, positive or negative). The page computes a running
 -- balance (entitlement - applications + adjustments) from these —
 -- nothing here stores that derived total.
+--
+-- payspace_employee_number is the one-time mapping to that person's
+-- PaySpace EmployeeNumber, used to show read-only PaySpace figures
+-- alongside these manually-entered ones (see the payspace Edge Function).
 
 create table if not exists leave_balances (
   person_name text primary key,
   entitlement numeric not null default 0,
   applications numeric not null default 0,
   adjustments numeric not null default 0,
+  payspace_employee_number text,
   updated_by text,
   updated_at timestamptz not null default now()
 );
