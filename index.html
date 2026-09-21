@@ -321,6 +321,19 @@
   .pill.at-risk{ background:var(--warning-soft); color:var(--warning); }
   .pill.blocked{ background:var(--danger-soft); color:var(--danger); }
   .pill-dot{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .owner-badge{
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px;
+    border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;
+    background:var(--surface-sunken); color:var(--ink-2); border:1px solid var(--border);
+    white-space:nowrap;
+  }
+  .owner-badge:hover{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-soft-border); }
+  .owner-badge-empty{ color:var(--ink-3); font-weight:500; font-style:italic; }
+  .inline-owner-input{
+    font: inherit; font-size:12px; color:var(--ink);
+    background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:999px;
+    padding:3px 10px; width:140px;
+  }
 
   .progress-label{
     display:flex; justify-content:space-between;
@@ -1467,6 +1480,10 @@ function hexToRgb(hex){
 function healthOption(value){
   return HEALTH_OPTIONS.find(h => h.value === value) || { value, label: value || "Unknown", color: "var(--ink-3)", soft: "var(--surface-sunken)" };
 }
+function ownerBadgeHtml(project){
+  const hasOwner = !!(project.owner && project.owner.trim());
+  return `<span class="owner-badge${hasOwner ? "" : " owner-badge-empty"}" data-edit-owner="${project.id}" title="Click to set the project owner">${hasOwner ? project.owner : "+ Add owner"}</span>`;
+}
 const ACTION_STATUS_OPTIONS = /*ACTION_STATUS_OPTIONS_START*/[{"value":"pending","label":"Pending","color":"var(--ink-2)","soft":"var(--surface-sunken)","isDone":false},{"value":"done","label":"Done","color":"var(--success)","soft":"var(--success-soft)","isDone":true},{"value":"dev-backlog","label":"Dev: Backlog","color":"#3d4b8c","soft":"rgba(61,75,140,0.16)","isDone":false},{"value":"dev-in-progress","label":"Dev: In Progress","color":"#84899f","soft":"rgba(132,137,159,0.16)","isDone":false}]/*ACTION_STATUS_OPTIONS_END*/;
 function actionStatusOption(value){
   return ACTION_STATUS_OPTIONS.find(s => s.value === value) || { value, label: value || "Pending", color: "var(--ink-2)", soft: "var(--surface-sunken)", isDone: false };
@@ -2326,6 +2343,7 @@ function buildSummaryCard(p, index, filtersActive){
         <span class="mono" style="color:var(--ink-3); font-size:11.5px;">${p.code || ""}</span>
         <span class="summary-name status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status">${p.name}</span>
         <span class="pill status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status" style="color:${health.color}; background:${health.soft}"><span class="pill-dot" style="background:${health.color}"></span>${health.label}</span>
+        ${ownerBadgeHtml(p)}
         <button type="button" class="summary-open-count" title="Open ${p.name}'s action items">${openCount} open action points</button>
       </div>
       ${latestNote ? `<div class="summary-next"><span class="next-label">Latest update</span>${formatDate(latestNote.date)} — ${latestNote.text}</div>` : `<div class="summary-next"><span class="next-label">Latest update</span>No status notes yet</div>`}
@@ -4273,6 +4291,7 @@ function selectProject(id){
       <div class="main-title-row">
         <span class="main-title-name status-identity-editable" data-edit-identity="${proj.id}" title="Click to edit name or status">${proj.name}</span>
         <span class="pill status-identity-editable" data-edit-identity="${proj.id}" title="Click to edit name or status" style="color:${health.color}; background:${health.soft}"><span class="pill-dot" style="background:${health.color}"></span>${health.label}</span>
+        ${ownerBadgeHtml(proj)}
       </div>
       ${latestNote ? `<div class="main-title-updated">Last updated ${formatDate(latestNote.date)}</div>` : ""}
     `;
@@ -4465,6 +4484,40 @@ function openInlineDateEditor(dateEl, itemId){
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Escape"){ settled = true; rerenderCurrentView(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+function openInlineOwnerEditor(ownerEl, projectId){
+  const project = PROJECTS.find(p => p.id === projectId);
+  if (!project) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-owner-input";
+  input.placeholder = "Owner name";
+  input.value = project.owner || "";
+  ownerEl.replaceWith(input);
+  input.focus();
+  input.select();
+  // The owner badge can appear on the Summary board too, which
+  // rerenderCurrentView() doesn't cover — refresh it here as well.
+  const cancelRerender = () => { renderSummary(); rerenderCurrentView(); };
+  let settled = false;
+  const commit = () => {
+    if (settled) return;
+    settled = true;
+    const trimmed = input.value.trim();
+    if (trimmed !== (project.owner || "")){
+      project.owner = trimmed;
+      refreshAll();
+    } else {
+      cancelRerender();
+    }
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; cancelRerender(); }
     else if (e.key === "Enter"){ commit(); }
   });
 }
@@ -5467,6 +5520,11 @@ document.addEventListener("click", (e) => {
   const editDateEl = e.target.closest("[data-edit-date]");
   if (editDateEl){
     openInlineDateEditor(editDateEl, Number(editDateEl.dataset.editDate));
+    return;
+  }
+  const editOwnerEl = e.target.closest("[data-edit-owner]");
+  if (editOwnerEl){
+    openInlineOwnerEditor(editOwnerEl, editOwnerEl.dataset.editOwner);
     return;
   }
   const editSimRechargeEl = e.target.closest("[data-edit-sim-recharge]");
