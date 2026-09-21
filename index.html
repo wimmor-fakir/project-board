@@ -509,6 +509,10 @@
   img.avatar{ object-fit:cover; }
   .person-name{ font-weight:600; font-size:13.5px; }
   .person-role{ font-size:11.5px; color:var(--ink-3); }
+  .person-owned-projects{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .person-owned-projects .owned-label{
+    font-weight:600; color:var(--ink-3); text-transform:uppercase; font-size:10px; letter-spacing:.05em;
+  }
   .person-head-detail{
     cursor:pointer; border-radius:6px; padding:2px 6px; margin:-2px -6px;
     border:1px solid var(--border);
@@ -2555,6 +2559,7 @@ function buildPersonGroupCard(person, filtersActive){
       <div class="person-head-detail" data-edit-person="${person.name}" title="Click to edit this person">
         <div class="person-name">${person.name}</div>
         <div class="person-role">${person.items.length} action${person.items.length === 1 ? "" : "s"} · ${person.projectCount} project${person.projectCount === 1 ? "" : "s"}</div>
+        ${person.ownedProjects.length ? `<div class="person-owned-projects"><span class="owned-label">Owns</span>${person.ownedProjects.map(p => `<span class="project-tag"><span class="tag-dot" style="background:${healthOption(p.health).color}"></span>${p.name}</span>`).join("")}</div>` : ""}
       </div>
       <div class="person-tally">${person.openCount} open</div>
       <span class="collapse-chevron" aria-hidden="true">${collapsed ? "▸" : "▾"}</span>
@@ -2600,6 +2605,15 @@ function renderByPerson(){
     });
   });
 
+  // A project owner shows up here even with no action items assigned.
+  const ownedProjectsByName = new Map();
+  PROJECTS.forEach(p => {
+    if (!p.owner) return;
+    if (!byName.has(p.owner)) byName.set(p.owner, []);
+    if (!ownedProjectsByName.has(p.owner)) ownedProjectsByName.set(p.owner, []);
+    ownedProjectsByName.get(p.owner).push(p);
+  });
+
   const companyByName = new Map();
   PROJECTS.forEach(p => {
     p.people.forEach(person => {
@@ -2617,6 +2631,7 @@ function renderByPerson(){
       company: companyByName.get(name) || "",
       openCount: items.filter(it => !actionStatusOption(it.status).isDone).length,
       projectCount: new Set(items.flatMap(it => it.projectIds)).size,
+      ownedProjects: ownedProjectsByName.get(name) || [],
     };
   });
   people.sort((a, b) => personSortKey(a.name) - personSortKey(b.name));
@@ -2629,7 +2644,7 @@ function renderByPerson(){
       return personOk && companyOk;
     })
     .map(person => ({ ...person, visibleItems: person.items.filter(it => matchesDateFilter(it, personDateFilter)) }))
-    .filter(person => person.visibleItems.length > 0);
+    .filter(person => person.visibleItems.length > 0 || person.ownedProjects.length > 0);
 
   const personChips = PEOPLE_ORDER.map(name => `
     <button type="button" class="filter-btn ${personFilter.has(name) ? "active" : ""}" data-person-filter data-value="${name}">${name}</button>
@@ -4492,7 +4507,10 @@ function openInlineOwnerEditor(ownerEl, projectId){
   if (!project) return;
   const select = document.createElement("select");
   select.className = "inline-owner-select";
-  const names = allPeopleNames();
+  // Only Hawktivity employees can be picked — but keep whatever is
+  // already set as an option too, so an existing value isn't lost.
+  const names = hawktivityPeopleNames();
+  if (project.owner && !names.includes(project.owner)) names.push(project.owner);
   select.innerHTML = `<option value="">Unassigned</option>` + names.map(n => `<option value="${n}"${n === project.owner ? " selected" : ""}>${n}</option>`).join("");
   ownerEl.replaceWith(select);
   select.focus();
@@ -4562,6 +4580,13 @@ function openInlineSimRechargeEditor(el, msisdn){
 
 function allPeopleNames(){
   return Array.from(new Set(PEOPLE_ORDER)).sort();
+}
+function hawktivityPeopleNames(){
+  const names = new Set();
+  PROJECTS.forEach(p => p.people.forEach(person => {
+    if (person.company === "Hawktivity" && person.name) names.add(person.name);
+  }));
+  return Array.from(names).sort();
 }
 function allCompanyNames(){
   const companies = new Set();
