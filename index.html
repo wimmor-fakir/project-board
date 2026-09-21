@@ -4127,11 +4127,10 @@ function leaveEopFor(name){
   return leaveBop(name) + leavePayspaceEntitlement(name) - psData.applications;
 }
 function formatLeaveDays(n){
-  const rounded = Math.round(n * 100) / 100;
-  return (rounded > 0 ? "+" : "") + rounded;
+  return (n > 0 ? "+" : "") + n.toFixed(2);
 }
 function formatPayspaceDays(n){
-  return Math.round(n * 100) / 100;
+  return n.toFixed(2);
 }
 function buildApplicationDetailsHtml(psData){
   if (!psData) return "—";
@@ -4155,8 +4154,8 @@ function buildLeaveTable(){
       <tr>
         <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
         <td><span class="leave-cell-editable leave-payspace-number" data-edit-leave-payspace-number="${name}" data-value="${psNumber}" title="Click to set this person's PaySpace Employee Number">${psNumber || "+ Add"}</span></td>
-        <td><span class="leave-cell-editable" data-edit-leave-bop="${name}" data-value="${leaveBop(name)}" title="Click to edit this person's Balance at start Of Period">${leaveBop(name)}</span></td>
-        <td><span class="leave-cell-editable" data-edit-leave-payspace-entitlement="${name}" data-value="${leavePayspaceEntitlement(name)}" title="Click to edit this person's entitlement for the current cycle">${leavePayspaceEntitlement(name)}</span></td>
+        <td><span class="leave-cell-editable" data-edit-leave-bop="${name}" data-value="${leaveBop(name)}" title="Click to edit this person's Balance at start Of Period">${formatPayspaceDays(leaveBop(name))}</span></td>
+        <td><span class="leave-cell-editable" data-edit-leave-payspace-entitlement="${name}" data-value="${leavePayspaceEntitlement(name)}" title="Click to edit this person's entitlement for the current cycle">${formatPayspaceDays(leavePayspaceEntitlement(name))}</span></td>
         <td class="leave-payspace-cell leave-payspace-applications-cell">${buildApplicationDetailsHtml(psData)}</td>
         <td class="mono leave-balance-cell" title="${psData ? "" : "Sync from PaySpace to compute — needs the PaySpace Applications total for this person"}">${eop === null ? "—" : formatLeaveDays(eop)}</td>
       </tr>`;
