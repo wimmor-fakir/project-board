@@ -4090,8 +4090,23 @@ const LEAVE_ENTITLEMENT_DEFAULT = 25; // default for payspace_entitlement when a
 let leaveBalances = {}; // leaveBalances[personName] = { bop, payspace_entitlement, payspace_employee_number }
 // Read-only reference data pulled from PaySpace on demand (see
 // syncPayspaceLeave) — keyed by PaySpace EmployeeNumber, never written
-// back and never overwrites bop or payspace_entitlement.
-let payspaceLeaveData = null; // null until a sync has run; then { [employeeNumber]: { entitlement, applications } }
+// back and never overwrites bop or payspace_entitlement. Cached in
+// localStorage so the last sync's figures survive a page reload instead
+// of reverting to "—" until someone syncs again.
+const PAYSPACE_LEAVE_CACHE_KEY = "project-board-payspace-leave-v1";
+function loadPayspaceLeaveCache(){
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PAYSPACE_LEAVE_CACHE_KEY) || "null");
+    return parsed && parsed.employees ? parsed : null;
+  } catch (err) { return null; }
+}
+function savePayspaceLeaveCache(employees, syncedAt){
+  try { localStorage.setItem(PAYSPACE_LEAVE_CACHE_KEY, JSON.stringify({ employees, syncedAt })); }
+  catch (err) {}
+}
+const payspaceLeaveCached = loadPayspaceLeaveCache();
+let payspaceLeaveData = payspaceLeaveCached ? payspaceLeaveCached.employees : null; // null until a sync has run (or cache loaded); then { [employeeNumber]: { entitlement, applications } }
+let payspaceLeaveSyncedAt = payspaceLeaveCached ? payspaceLeaveCached.syncedAt : null;
 let payspaceSyncError = null;
 let payspaceSyncing = false;
 function leaveBop(name){
@@ -4322,6 +4337,8 @@ async function syncPayspaceLeave(){
     if (error) throw new Error(await describeFunctionError(error));
     if (data && data.error) throw new Error(data.error);
     payspaceLeaveData = (data && data.employees) || {};
+    payspaceLeaveSyncedAt = new Date().toISOString();
+    savePayspaceLeaveCache(payspaceLeaveData, payspaceLeaveSyncedAt);
   } catch (e) {
     payspaceSyncError = e.message;
   }
@@ -4336,7 +4353,7 @@ function renderLeaveContent(){
     </div>
     <div class="leave-payspace-bar">
       <button type="button" class="btn btn-secondary" id="syncPayspaceBtn" ${payspaceSyncing ? "disabled" : ""}>${payspaceSyncing ? "Syncing…" : "⇅ Sync from PaySpace"}</button>
-      <span class="field-hint">Set each person's PaySpace # below, then sync to see their approved PaySpace applications (1 May 2026 – 30 Apr 2027 only) — EOP needs that figure, so it shows "—" until synced. Click a PaySpace Applications number to see the individual dates.</span>
+      <span class="field-hint">Set each person's PaySpace # below, then sync to see their approved PaySpace applications (1 May 2026 – 30 Apr 2027 only) — EOP needs that figure, so it shows "—" until synced. Click a PaySpace Applications number to see the individual dates.${payspaceLeaveSyncedAt ? ` Showing the last sync from ${formatChangeTimestamp(payspaceLeaveSyncedAt)}.` : ""}</span>
       ${payspaceSyncError ? `<p class="modal-error">Couldn't sync from PaySpace: ${payspaceSyncError} — has the payspace Edge Function been deployed, and are PAYSPACE_CLIENT_ID/PAYSPACE_CLIENT_SECRET set?</p>` : ""}
     </div>
     <div class="leave-table-card">
