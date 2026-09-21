@@ -748,6 +748,10 @@
     background:var(--ink-3); width:11px; height:9px;
     clip-path: polygon(0 9px,0 5px,2px 5px,2px 9px,4px 9px,4px 3px,6px 3px,6px 9px,8px 9px,8px 0,10px 0,10px 9px);
   }
+  .tab-dot.goals-dot{
+    background:var(--ink-3); width:11px; height:11px; border-radius:50%;
+    box-shadow: inset 0 0 0 2px var(--surface), inset 0 0 0 4px var(--ink-3), inset 0 0 0 6px var(--surface);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -931,6 +935,55 @@
   .forecast-line-chart-toggle input{ cursor:pointer; }
   .forecast-line-label-editable{ cursor:pointer; }
   .forecast-line-label-editable:hover{ text-decoration:underline; color:var(--accent); }
+
+  /* ---------- Goals panel ---------- */
+  .goals-date-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:16px 18px; margin-bottom:16px;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .goals-date-label{ font-size:12px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:.04em; }
+  .goals-date-editable{
+    font-size:14px; font-weight:700; color:var(--ink); cursor:pointer;
+    padding:3px 10px; border-radius:999px; background:var(--accent-soft); border:1px solid var(--accent-soft-border);
+  }
+  .goals-date-editable:hover{ filter:brightness(0.97); }
+  .goals-date-input{ font: inherit; font-size:13px; }
+  .goals-table-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:18px;
+  }
+  .goals-table-scroll{
+    overflow:auto; max-height:60vh;
+    scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent;
+  }
+  .goals-table-scroll::-webkit-scrollbar{ height:8px; width:8px; }
+  .goals-table-scroll::-webkit-scrollbar-track{ background:transparent; }
+  .goals-table-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .goals-table-scroll::-webkit-scrollbar-thumb:hover{ background:var(--ink-3); }
+  .goals-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  .goals-table th, .goals-table td{ padding:10px 14px; text-align:left; vertical-align:top; }
+  .goals-table thead th{
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ink-3); border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:var(--surface); z-index:2;
+  }
+  .goals-table tbody tr{ border-bottom:1px solid var(--border); }
+  .goals-table tbody tr:last-child{ border-bottom:none; }
+  .goals-table tbody tr:hover{ background:var(--surface-sunken); }
+  .goals-project-cell{
+    font-weight:600; white-space:nowrap;
+    position:sticky; left:0; background:var(--surface); z-index:1;
+  }
+  .goals-table thead th.goals-project-cell{ z-index:3; }
+  .goals-table tbody tr:hover .goals-project-cell{ background:var(--surface-sunken); }
+  .goals-cell-editable{ cursor:pointer; display:block; min-width:160px; }
+  .goals-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
+  .goals-cell-input{
+    font: inherit; font-size:12.5px; color:var(--ink); width:100%; min-width:160px;
+    background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
+    padding:4px 8px;
+  }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -1739,6 +1792,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "simcards", label: "SIM Cards" },
   { key: "teamupdate", label: "Team Update" },
   { key: "forecasting", label: "Forecasting" },
+  { key: "goals", label: "Goals" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2300,6 +2354,24 @@ function renderRail(){
     rail.appendChild(forecastingTab);
   }
 
+  if (hasPageAccess("goals")){
+    const goalsTab = document.createElement("button");
+    goalsTab.className = "tab";
+    goalsTab.role = "tab";
+    goalsTab.id = "tab-goals";
+    goalsTab.dataset.id = "goals";
+    goalsTab.setAttribute("aria-controls", "panel-goals");
+    goalsTab.innerHTML = `
+      <span class="tab-dot goals-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Goals</div>
+        <div class="tab-meta">Up to 3 per project</div>
+      </span>
+    `;
+    goalsTab.addEventListener("click", () => selectProject("goals"));
+    rail.appendChild(goalsTab);
+  }
+
   const divider = document.createElement("div");
   divider.className = "rail-divider";
   rail.appendChild(divider);
@@ -2771,6 +2843,13 @@ forecastingPanel.id = "panel-forecasting";
 forecastingPanel.role = "tabpanel";
 forecastingPanel.setAttribute("aria-labelledby", "tab-forecasting");
 panelsEl.appendChild(forecastingPanel);
+
+const goalsPanel = document.createElement("section");
+goalsPanel.className = "panel";
+goalsPanel.id = "panel-goals";
+goalsPanel.role = "tabpanel";
+goalsPanel.setAttribute("aria-labelledby", "tab-goals");
+panelsEl.appendChild(goalsPanel);
 
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
@@ -3748,6 +3827,158 @@ async function renderForecasting(){
   renderForecastingContent();
 }
 
+/* ---------- Goals ---------- */
+let goalsTargetDate = null; // shared "date for next goals" — same for every project
+let projectGoals = {}; // projectGoals[projectId][slot 1-3] = text
+function goalText(projectId, slot){
+  return (projectGoals[projectId] && projectGoals[projectId][slot]) || "";
+}
+function buildGoalsTable(){
+  const rows = PROJECTS.map(p => {
+    const cells = [1, 2, 3].map(slot => {
+      const text = goalText(p.id, slot);
+      return `<td><span class="goals-cell-editable" data-edit-goal="${p.id}" data-goal-slot="${slot}" title="Click to edit this goal">${text || "+ Add goal"}</span></td>`;
+    }).join("");
+    return `<tr><td class="goals-project-cell">${p.name}</td>${cells}</tr>`;
+  }).join("");
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <table class="goals-table">
+      <thead>
+        <tr><th class="goals-project-cell">Project</th><th>Goal 1</th><th>Goal 2</th><th>Goal 3</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  return wrap.firstElementChild;
+}
+async function saveGoalsDate(dateStr){
+  goalsTargetDate = dateStr;
+  try {
+    const { error } = await supabaseClient.from("goals_settings").upsert({
+      id: "default",
+      target_date: dateStr,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save the goals date — has supabase-goals.sql been run yet? (" + e.message + ")");
+  }
+}
+async function saveProjectGoal(projectId, slot, text){
+  if (!projectGoals[projectId]) projectGoals[projectId] = {};
+  projectGoals[projectId][slot] = text;
+  try {
+    const { error } = await supabaseClient.from("project_goals").upsert({
+      project_id: projectId,
+      slot,
+      text,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "project_id,slot" });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save the goal — has supabase-goals.sql been run yet? (" + e.message + ")");
+  }
+}
+function openInlineGoalsDateEditor(dateEl){
+  const input = document.createElement("input");
+  input.type = "date";
+  input.className = "inline-date-input goals-date-input";
+  input.value = goalsTargetDate || "";
+  dateEl.replaceWith(input);
+  input.focus();
+  if (input.showPicker){
+    try { input.showPicker(); } catch (err) {}
+  }
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    if (input.value && input.value !== goalsTargetDate){
+      await saveGoalsDate(input.value);
+    }
+    renderGoalsContent();
+  };
+  input.addEventListener("change", commit);
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderGoalsContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+function openInlineGoalEditor(el, projectId, slot){
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "goals-cell-input";
+  input.placeholder = "Goal text";
+  input.value = goalText(projectId, slot);
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const trimmed = input.value.trim();
+    if (trimmed !== goalText(projectId, slot)){
+      await saveProjectGoal(projectId, slot, trimmed);
+    }
+    renderGoalsContent();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderGoalsContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+function renderGoalsContent(){
+  goalsPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Up to 3 goals per project, for the current target date.</p>
+      <button type="button" class="btn btn-new" id="refreshGoalsBtn">↻ Refresh</button>
+    </div>
+    <div class="goals-date-card">
+      <span class="goals-date-label">Date for next goals</span>
+      <span class="goals-date-value goals-date-editable" data-edit-goals-date title="Click to change the target date">${goalsTargetDate ? formatDateWithYear(goalsTargetDate) : "Not set"}</span>
+    </div>
+    <div class="goals-table-card">
+      <div class="goals-table-scroll" id="goalsTableScroll"></div>
+    </div>
+  `;
+  document.getElementById("refreshGoalsBtn").addEventListener("click", renderGoals);
+  document.getElementById("goalsTableScroll").appendChild(buildGoalsTable());
+}
+async function renderGoals(){
+  if (!hasPageAccess("goals")) return;
+  if (!supabaseClient || !authSession){
+    goalsPanel.innerHTML = `<p class="summary-facts">Sign in to see goals.</p>`;
+    return;
+  }
+  goalsPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const [settingsResult, goalsResult] = await Promise.all([
+    supabaseClient.from("goals_settings").select("*").eq("id", "default").maybeSingle(),
+    supabaseClient.from("project_goals").select("*"),
+  ]);
+  if (currentId !== "goals") return; // user navigated away while this was loading
+  if (settingsResult.error || goalsResult.error){
+    goalsPanel.innerHTML = `<p class="summary-facts">Couldn't load goals — has supabase-goals.sql been run yet?</p>`;
+    return;
+  }
+  goalsTargetDate = (settingsResult.data && settingsResult.data.target_date) || null;
+  projectGoals = {};
+  goalsResult.data.forEach(row => {
+    if (!projectGoals[row.project_id]) projectGoals[row.project_id] = {};
+    projectGoals[row.project_id][row.slot] = row.text;
+  });
+  renderGoalsContent();
+}
+
 function renderSettings(){
   if (!hasPageAccess("settings")) return;
   const healthRows = HEALTH_OPTIONS.map(opt => buildSettingsStatusRow(
@@ -4239,7 +4470,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -4306,6 +4537,10 @@ function selectProject(id){
     mainTitleEl.textContent = "Forecasting";
     document.getElementById("crumb").textContent = "Overview";
     renderForecasting();
+  } else if (id === "goals"){
+    mainTitleEl.textContent = "Goals";
+    document.getElementById("crumb").textContent = "Overview";
+    renderGoals();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
@@ -5578,6 +5813,16 @@ document.addEventListener("click", (e) => {
   const editLineLabelEl = e.target.closest("[data-edit-line-label]");
   if (editLineLabelEl){
     openInlineLineLabelEditor(editLineLabelEl, editLineLabelEl.dataset.editLineLabel);
+    return;
+  }
+  const editGoalsDateEl = e.target.closest("[data-edit-goals-date]");
+  if (editGoalsDateEl){
+    openInlineGoalsDateEditor(editGoalsDateEl);
+    return;
+  }
+  const editGoalEl = e.target.closest("[data-edit-goal]");
+  if (editGoalEl){
+    openInlineGoalEditor(editGoalEl, editGoalEl.dataset.editGoal, Number(editGoalEl.dataset.goalSlot));
     return;
   }
   const addLineBtn = e.target.closest("[data-add-line-project]");

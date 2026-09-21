@@ -8,7 +8,7 @@ C: drive and hosting it as a real website, with Supabase as the database.
 `index.html` now talks to Supabase directly (instead of Claude's Artifact
 database), requires sign-in before showing the board (matching the access
 decision in Part 4), and logs who changes each action item to an
-Activity tab. **Five things still need doing before it actually works
+Activity tab. **Six things still need doing before it actually works
 when you open the live site** — all one-time, no-code steps:
 
 1. **Run `supabase-setup.sql`** — open it, copy its contents, paste into
@@ -52,15 +52,19 @@ when you open the live site** — all one-time, no-code steps:
      line from the chart?** Run `supabase-migration-forecast-line-chart-toggle.sql`
      once — it adds that column, defaulting every existing line to
      included (matching how they behaved before the toggle existed).
-5. **Create at least one user account for yourself** — see Part 4 below
+5. **Run `supabase-goals.sql`** too — creates the tables behind the Goals
+   page. Every project can have up to 3 goals, all set for one shared
+   "date for next goals" (the same date applies to every project, editable
+   at the top of the page).
+6. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
-6. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
+7. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
    powers the Settings page's "User management" section (invite/remove
    people, and who can see Settings/Activity/SIM Cards/Team Update/
-   Forecasting); everything else works without it.
+   Forecasting/Goals); everything else works without it.
 
-Once the first five are done, push the code (see Part 1) and the live
+Once the first six are done, push the code (see Part 1) and the live
 site will save, sync, and log activity for real, for anyone you've
 created an account for. Part 5 (Edge Function) is separate and only
 needed for in-app invite/remove/page-access.
@@ -275,11 +279,11 @@ only if a specific need for something more restrictive comes up.
 
 The Settings page has an admin-only "User management" section (invite
 people by email, remove accounts, and tick which of the Settings,
-Activity, SIM Cards, Team Update, and Forecasting pages each person can
-see). It only works for the account whose email matches `ADMIN_EMAIL` in
-`supabase-edge-function/manage-users.ts` (currently
+Activity, SIM Cards, Team Update, Forecasting, and Goals pages each
+person can see). It only works for the account whose email matches
+`ADMIN_EMAIL` in `supabase-edge-function/manage-users.ts` (currently
 `wim@hawktivity.com`) — everyone else won't even see that section.
-By default, nobody but the admin can see any of those five pages —
+By default, nobody but the admin can see any of those six pages —
 that's controlled by the checkboxes in this section, one tick per
 person per page.
 
@@ -306,13 +310,13 @@ still letting the app call it safely over the internet.
    a list of current users instead of an error.
 
 **Already had this function deployed before per-page access existed
-(or before Team Update or Forecasting were added)?** Re-copy
+(or before Team Update, Forecasting, or Goals were added)?** Re-copy
 `supabase-edge-function/manage-users.ts` into it and redeploy (steps
 4-5 above) to pick up the checkboxes. One consequence worth knowing:
 the moment this redeploys, everyone except the admin loses access to
-Settings, Activity, SIM Cards, Team Update, and Forecasting until you
-re-tick the pages they should keep seeing — nothing else about their
-account changes.
+Settings, Activity, SIM Cards, Team Update, Forecasting, and Goals
+until you re-tick the pages they should keep seeing — nothing else
+about their account changes.
 
 Before inviting anyone from this section, make sure Part 4 step 4 (Site
 URL / Redirect URLs pointing at your real site, not `localhost:3000`) is
@@ -395,6 +399,7 @@ step 3 above to redeploy with the new value.
 | Run `supabase-project-forecasts.sql` too | Creates the tables behind the Forecasting page (each project can have multiple named lines, each with its own locations & price per month) |
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
+| Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
