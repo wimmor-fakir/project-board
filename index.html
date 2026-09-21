@@ -968,6 +968,8 @@
     background:var(--surface-sunken); color:var(--ink-2); border:1px solid var(--border);
     white-space:nowrap;
   }
+  .simcard-tag-chip.simcard-tag-red{ background:var(--danger-soft); color:var(--danger); border-color:transparent; }
+  .simcard-tag-chip.simcard-tag-blue{ background:var(--accent-soft); color:var(--accent); border-color:transparent; }
   .settings-rename-input{
     font: inherit; font-size:13px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:6px;
@@ -2976,6 +2978,12 @@ function formatDateWithYear(iso){
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+function simTagClass(tag){
+  const t = tag.toLowerCase();
+  if (t.includes("plug")) return " simcard-tag-red";
+  if (t.includes("hawktivity")) return " simcard-tag-blue";
+  return "";
+}
 function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
   const row = document.createElement("tr");
   const suspended = !!sim.suspended_at;
@@ -2988,7 +2996,7 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
       <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
       <div class="simcard-msisdn mono">${sim.msisdn || ""}</div>
     </td>
-    <td>${(sim.tags && sim.tags.length) ? `<div class="simcard-tags">${sim.tags.map(t => `<span class="simcard-tag-chip">${t}</span>`).join("")}</div>` : "—"}</td>
+    <td>${(sim.tags && sim.tags.length) ? `<div class="simcard-tags">${sim.tags.map(t => `<span class="simcard-tag-chip${simTagClass(t)}">${t}</span>`).join("")}</div>` : "—"}</td>
     <td><span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span></td>
     <td class="mono">${formatDataMb(sim.data_balance_mb)}</td>
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
