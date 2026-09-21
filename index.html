@@ -3804,6 +3804,11 @@ async function renderForecasting(){
 /* ---------- Goals ---------- */
 let goalsTargetDate = null; // shared "date for next goals" — same for every project
 let projectGoals = {}; // projectGoals[projectId][slot 1-3] = text
+const goalsOwnerFilter = new Set();
+function toggleGoalsOwnerFilter(value){
+  if (goalsOwnerFilter.has(value)) goalsOwnerFilter.delete(value); else goalsOwnerFilter.add(value);
+  renderGoalsContent();
+}
 function goalText(projectId, slot){
   return (projectGoals[projectId] && projectGoals[projectId][slot]) || "";
 }
@@ -3837,7 +3842,8 @@ function rerenderGoalsViews(){
   else rerenderCurrentView();
 }
 function buildGoalsTable(){
-  const rows = PROJECTS.map(p => {
+  const filteredProjects = PROJECTS.filter(p => goalsOwnerFilter.size === 0 || goalsOwnerFilter.has(p.owner || "Unassigned"));
+  const rows = filteredProjects.map(p => {
     const cells = [1, 2, 3].map(slot => {
       const text = goalText(p.id, slot);
       return `<td><span class="goals-cell-editable" data-edit-goal="${p.id}" data-goal-slot="${slot}" title="Click to edit this goal">${text || "+ Add goal"}</span></td>`;
@@ -3845,6 +3851,10 @@ function buildGoalsTable(){
     return `<tr><td class="goals-project-cell">${p.name}</td>${cells}</tr>`;
   }).join("");
   const wrap = document.createElement("div");
+  if (!filteredProjects.length){
+    wrap.innerHTML = `<p class="summary-facts">No projects match the selected owner filter.</p>`;
+    return wrap.firstElementChild;
+  }
   wrap.innerHTML = `
     <table class="goals-table">
       <thead>
@@ -3941,6 +3951,14 @@ function openInlineGoalEditor(el, projectId, slot){
   });
 }
 function renderGoalsContent(){
+  const owners = Array.from(new Set(PROJECTS.map(p => p.owner || "Unassigned"))).sort((a, b) => {
+    if (a === "Unassigned") return 1;
+    if (b === "Unassigned") return -1;
+    return a.localeCompare(b);
+  });
+  const ownerChips = owners.map(name => `
+    <button type="button" class="filter-btn ${goalsOwnerFilter.has(name) ? "active" : ""}" data-goals-owner-filter data-value="${name}">${name}</button>
+  `).join("");
   goalsPanel.innerHTML = `
     <div class="summary-intro">
       <p>Up to 3 goals per project, for the current target date.</p>
@@ -3950,11 +3968,18 @@ function renderGoalsContent(){
       <span class="goals-date-label">Date for next goals</span>
       <span class="goals-date-value goals-date-editable" data-edit-goals-date title="Click to change the target date">${goalsTargetDate ? formatDateWithYear(goalsTargetDate) : "Not set"}</span>
     </div>
+    <div class="action-filter-row">
+      <span class="filter-label">Owner</span>
+      <div class="filter-group" role="group" aria-label="Filter by owner (select any number)">${ownerChips}</div>
+      ${goalsOwnerFilter.size > 0 ? `<button type="button" class="btn btn-clear-filters" id="clearGoalsOwnerFilter">✕ Clear</button>` : ""}
+    </div>
     <div class="goals-table-card">
       <div class="goals-table-scroll" id="goalsTableScroll"></div>
     </div>
   `;
   document.getElementById("refreshGoalsBtn").addEventListener("click", renderGoals);
+  const clearGoalsOwnerFilterBtn = document.getElementById("clearGoalsOwnerFilter");
+  if (clearGoalsOwnerFilterBtn) clearGoalsOwnerFilterBtn.addEventListener("click", () => { goalsOwnerFilter.clear(); renderGoalsContent(); });
   document.getElementById("goalsTableScroll").appendChild(buildGoalsTable());
 }
 async function renderGoals(){
@@ -5784,6 +5809,11 @@ document.addEventListener("click", (e) => {
   const editGoalEl = e.target.closest("[data-edit-goal]");
   if (editGoalEl){
     openInlineGoalEditor(editGoalEl, editGoalEl.dataset.editGoal, Number(editGoalEl.dataset.goalSlot));
+    return;
+  }
+  const goalsOwnerFilterBtn = e.target.closest("[data-goals-owner-filter]");
+  if (goalsOwnerFilterBtn){
+    toggleGoalsOwnerFilter(goalsOwnerFilterBtn.dataset.value);
     return;
   }
   const addLineBtn = e.target.closest("[data-add-line-project]");
