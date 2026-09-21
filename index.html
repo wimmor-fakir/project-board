@@ -329,10 +329,10 @@
   }
   .owner-badge:hover{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-soft-border); }
   .owner-badge-empty{ color:var(--ink-3); font-weight:500; font-style:italic; }
-  .inline-owner-input{
+  .inline-owner-select{
     font: inherit; font-size:12px; color:var(--ink);
     background:var(--surface); border:1px solid var(--accent-soft-border); border-radius:999px;
-    padding:3px 10px; width:140px;
+    padding:3px 8px; max-width:160px;
   }
 
   .progress-label{
@@ -4490,14 +4490,15 @@ function openInlineDateEditor(dateEl, itemId){
 function openInlineOwnerEditor(ownerEl, projectId){
   const project = PROJECTS.find(p => p.id === projectId);
   if (!project) return;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "inline-owner-input";
-  input.placeholder = "Owner name";
-  input.value = project.owner || "";
-  ownerEl.replaceWith(input);
-  input.focus();
-  input.select();
+  const select = document.createElement("select");
+  select.className = "inline-owner-select";
+  const names = allPeopleNames();
+  select.innerHTML = `<option value="">Unassigned</option>` + names.map(n => `<option value="${n}"${n === project.owner ? " selected" : ""}>${n}</option>`).join("");
+  ownerEl.replaceWith(select);
+  select.focus();
+  if (select.showPicker){
+    try { select.showPicker(); } catch (err) {}
+  }
   // The owner badge can appear on the Summary board too, which
   // rerenderCurrentView() doesn't cover — refresh it here as well.
   const cancelRerender = () => { renderSummary(); rerenderCurrentView(); };
@@ -4505,20 +4506,19 @@ function openInlineOwnerEditor(ownerEl, projectId){
   const commit = () => {
     if (settled) return;
     settled = true;
-    const trimmed = input.value.trim();
-    if (trimmed !== (project.owner || "")){
-      project.owner = trimmed;
+    if (select.value !== (project.owner || "")){
+      project.owner = select.value;
       refreshAll();
     } else {
       cancelRerender();
     }
   };
-  input.addEventListener("blur", commit);
-  input.addEventListener("click", (e) => e.stopPropagation());
-  input.addEventListener("keydown", (e) => {
+  select.addEventListener("change", commit);
+  select.addEventListener("blur", commit);
+  select.addEventListener("click", (e) => e.stopPropagation());
+  select.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Escape"){ settled = true; cancelRerender(); }
-    else if (e.key === "Enter"){ commit(); }
   });
 }
 
