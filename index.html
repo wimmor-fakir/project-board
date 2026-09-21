@@ -361,16 +361,6 @@
   .fact-value{ font-size:13px; font-weight:500; }
   .fact-value.mono{ font-size:12.5px; }
 
-  .status-note{
-    font-size:12.5px;
-    color:var(--ink-2);
-    background:var(--surface-sunken);
-    border:1px solid var(--border);
-    border-radius:8px;
-    padding:10px 11px;
-  }
-  .status-note b{ color:var(--ink); font-weight:600; }
-
   /* ---------- Route-to-Revenue status card ---------- */
   .rtr-card{ padding:18px; display:flex; flex-direction:column; gap:18px; }
   .rtr-section-title{
@@ -393,25 +383,30 @@
   .rtr-section-row .rtr-section-title{ margin-bottom:0; }
   .rtr-notes-block{ display:flex; flex-direction:column; flex:1; min-height:0; }
   .note-list-scroll{ flex:1; min-height:60px; overflow-y:auto; padding-right:6px; }
+  .rtr-goals-block{ display:flex; flex-direction:column; flex:1; min-height:0; }
+  .goal-list-scroll{ flex:1; min-height:40px; overflow-y:auto; padding-right:6px; }
+  .goal-list{ display:flex; flex-direction:column; gap:8px; }
+  .goal-row{ display:flex; align-items:baseline; gap:8px; }
+  .goal-slot-label{
+    font-size:10.5px; font-weight:600; color:var(--ink-3); text-transform:uppercase;
+    letter-spacing:.05em; flex:none; width:48px;
+  }
+  .goal-row-editable{
+    font-size:12.5px; color:var(--ink); cursor:pointer; flex:1; min-width:0;
+    padding:2px 4px; margin:-2px -4px; border-radius:6px;
+  }
+  .goal-row-editable:hover{ background:var(--surface-sunken); color:var(--accent); }
   @media (max-width: 900px){
     .rtr-notes-block{ flex:none; }
     .note-list-scroll{ flex:none; max-height:230px; }
-    .status-note-editable{ max-height:none; overflow-y:visible; }
+    .rtr-goals-block{ flex:none; }
   }
-  .status-note-editable{
-    cursor:pointer; transition:background .1s ease, border-color .1s ease;
-    flex-shrink:0; max-height:220px; overflow-y:auto;
-  }
-  .status-note-editable:hover{ background:var(--surface); border-color:var(--accent-soft-border); }
   .status-identity-editable{ cursor:pointer; border-radius:6px; transition:opacity .1s ease; }
   .status-identity-editable:hover{ opacity:.8; }
   .main-title-name.status-identity-editable{ padding:2px 6px; margin:-2px -6px; }
   .main-title-name.status-identity-editable:hover{ opacity:1; background:var(--surface-sunken); }
   .summary-name.status-identity-editable{ padding:2px 6px; margin:-2px -6px; border-radius:6px; }
   .summary-name.status-identity-editable:hover{ opacity:1; background:var(--surface-sunken); }
-  .status-note-head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:4px; }
-  .status-note-head b{ color:var(--ink); font-weight:600; }
-  .note-updated{ font-size:10.5px; color:var(--ink-3); white-space:nowrap; }
 
   /* ---------- Action list ---------- */
   .action-panel{ display:flex; flex-direction:column; gap:14px; min-height:0; }
@@ -1336,28 +1331,6 @@
   </div>
 </div>
 
-<div class="modal-backdrop" id="riskModalBackdrop" hidden="">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="riskModalTitle">
-    <div class="modal-head">
-      <h3 id="riskModalTitle">Edit risks</h3>
-      <button class="modal-close" id="riskModalClose" aria-label="Close" type="button">×</button>
-    </div>
-    <div class="modal-body">
-      <label class="field">
-        <span>Risks</span>
-        <textarea id="riskFieldText" rows="6"></textarea>
-      </label>
-    </div>
-    <div class="modal-foot">
-      <div></div>
-      <div class="modal-foot-right">
-        <button class="btn btn-secondary" id="riskModalCancel" type="button">Cancel</button>
-        <button class="btn btn-primary" id="riskModalSave" type="button">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="modal-backdrop" id="noteModalBackdrop" hidden="">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
     <div class="modal-head">
@@ -2015,6 +1988,7 @@ async function startAfterSignIn(){
 async function proceedIntoApp(){
   revealApp();
   try {
+    await loadGoalsData(); // best-effort — shows up on every project page, not just the Goals tab
     await loadBoardFromSupabase();
     subscribeToBoardChanges();
   } catch (e) {
@@ -3833,6 +3807,35 @@ let projectGoals = {}; // projectGoals[projectId][slot 1-3] = text
 function goalText(projectId, slot){
   return (projectGoals[projectId] && projectGoals[projectId][slot]) || "";
 }
+// Goals also show on every project's own page, so this is loaded proactively
+// at sign-in (see proceedIntoApp) rather than only when visiting the Goals
+// page. Best-effort: a missing/not-yet-migrated table shouldn't block the
+// rest of the app from loading.
+async function loadGoalsData(){
+  try {
+    const [settingsResult, goalsResult] = await Promise.all([
+      supabaseClient.from("goals_settings").select("*").eq("id", "default").maybeSingle(),
+      supabaseClient.from("project_goals").select("*"),
+    ]);
+    if (settingsResult.error || goalsResult.error) return false;
+    goalsTargetDate = (settingsResult.data && settingsResult.data.target_date) || null;
+    projectGoals = {};
+    (goalsResult.data || []).forEach(row => {
+      if (!projectGoals[row.project_id]) projectGoals[row.project_id] = {};
+      projectGoals[row.project_id][row.slot] = row.text;
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+// After saving a goal (or cancelling), refresh whichever view is showing it —
+// the Goals page's table, or a project page's embedded goals card — without
+// touching the unrelated board_state/undo-history machinery.
+function rerenderGoalsViews(){
+  if (currentId === "goals") renderGoalsContent();
+  else rerenderCurrentView();
+}
 function buildGoalsTable(){
   const rows = PROJECTS.map(p => {
     const cells = [1, 2, 3].map(slot => {
@@ -3899,14 +3902,14 @@ function openInlineGoalsDateEditor(dateEl){
     if (input.value && input.value !== goalsTargetDate){
       await saveGoalsDate(input.value);
     }
-    renderGoalsContent();
+    rerenderGoalsViews();
   };
   input.addEventListener("change", commit);
   input.addEventListener("blur", commit);
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
-    if (e.key === "Escape"){ settled = true; renderGoalsContent(); }
+    if (e.key === "Escape"){ settled = true; rerenderGoalsViews(); }
     else if (e.key === "Enter"){ commit(); }
   });
 }
@@ -3927,13 +3930,13 @@ function openInlineGoalEditor(el, projectId, slot){
     if (trimmed !== goalText(projectId, slot)){
       await saveProjectGoal(projectId, slot, trimmed);
     }
-    renderGoalsContent();
+    rerenderGoalsViews();
   };
   input.addEventListener("blur", commit);
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
-    if (e.key === "Escape"){ settled = true; renderGoalsContent(); }
+    if (e.key === "Escape"){ settled = true; rerenderGoalsViews(); }
     else if (e.key === "Enter"){ commit(); }
   });
 }
@@ -3961,21 +3964,12 @@ async function renderGoals(){
     return;
   }
   goalsPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
-  const [settingsResult, goalsResult] = await Promise.all([
-    supabaseClient.from("goals_settings").select("*").eq("id", "default").maybeSingle(),
-    supabaseClient.from("project_goals").select("*"),
-  ]);
+  const ok = await loadGoalsData();
   if (currentId !== "goals") return; // user navigated away while this was loading
-  if (settingsResult.error || goalsResult.error){
+  if (!ok){
     goalsPanel.innerHTML = `<p class="summary-facts">Couldn't load goals — has supabase-goals.sql been run yet?</p>`;
     return;
   }
-  goalsTargetDate = (settingsResult.data && settingsResult.data.target_date) || null;
-  projectGoals = {};
-  goalsResult.data.forEach(row => {
-    if (!projectGoals[row.project_id]) projectGoals[row.project_id] = {};
-    projectGoals[row.project_id][row.slot] = row.text;
-  });
   renderGoalsContent();
 }
 
@@ -4326,6 +4320,14 @@ function buildStatusCard(p){
   const sortedNotes = (p.statusNotes && p.statusNotes.length)
     ? [...p.statusNotes].sort((a, b) => b.date.localeCompare(a.date))
     : [];
+  const goalRows = [1, 2, 3].map(slot => {
+    const text = goalText(p.id, slot);
+    return `
+      <div class="goal-row">
+        <span class="goal-slot-label">Goal ${slot}</span>
+        <span class="goal-row-editable" data-edit-goal="${p.id}" data-goal-slot="${slot}" title="Click to edit this goal">${text || "+ Add goal"}</span>
+      </div>`;
+  }).join("");
   return `
     <div class="card rtr-card">
       <div class="rtr-notes-block">
@@ -4335,12 +4337,11 @@ function buildStatusCard(p){
         </div>
         <div class="note-list note-list-scroll">${sortedNotes.length ? noteRows(sortedNotes) : `<p class="summary-facts">No status notes yet.</p>`}</div>
       </div>
-      <div class="status-note status-note-editable" data-edit-note="${p.id}">
-        <div class="status-note-head">
-          <b>Risks</b>
-          ${p.noteUpdatedAt ? `<span class="note-updated">Last edited ${formatDate(p.noteUpdatedAt)}</span>` : ""}
+      <div class="rtr-goals-block">
+        <div class="rtr-section-row">
+          <div class="rtr-section-title">Goals${goalsTargetDate ? ` — ${formatDateWithYear(goalsTargetDate)}` : ""}</div>
         </div>
-        <div>${p.note || "Click to add risks."}</div>
+        <div class="goal-list goal-list-scroll">${goalRows}</div>
       </div>
     </div>`;
 }
@@ -5142,40 +5143,6 @@ deleteModalBackdrop.addEventListener("click", (e) => {
   if (e.target === deleteModalBackdrop) closeDeleteModal();
 });
 
-/* ---------- Edit risks modal ---------- */
-const riskModalBackdrop = document.getElementById("riskModalBackdrop");
-const riskFieldText = document.getElementById("riskFieldText");
-let editingRiskProjectId = null;
-
-function openRiskModal(projectId){
-  const project = PROJECTS.find(p => p.id === projectId);
-  if (!project) return;
-  editingRiskProjectId = projectId;
-  riskFieldText.value = project.note || "";
-  riskModalBackdrop.hidden = false;
-  riskFieldText.focus();
-}
-function closeRiskModal(){
-  riskModalBackdrop.hidden = true;
-  editingRiskProjectId = null;
-}
-function saveRiskModal(){
-  const project = PROJECTS.find(p => p.id === editingRiskProjectId);
-  if (project){
-    project.note = riskFieldText.value.trim();
-    project.noteUpdatedAt = TODAY.toISOString().slice(0, 10);
-  }
-  closeRiskModal();
-  refreshAll();
-}
-
-document.getElementById("riskModalSave").addEventListener("click", saveRiskModal);
-document.getElementById("riskModalCancel").addEventListener("click", closeRiskModal);
-document.getElementById("riskModalClose").addEventListener("click", closeRiskModal);
-riskModalBackdrop.addEventListener("click", (e) => {
-  if (e.target === riskModalBackdrop) closeRiskModal();
-});
-
 /* ---------- New status note modal ---------- */
 const noteModalBackdrop = document.getElementById("noteModalBackdrop");
 const noteFieldDate = document.getElementById("noteFieldDate");
@@ -5498,7 +5465,6 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!itemModalBackdrop.hidden) closeItemModal();
   if (!deleteModalBackdrop.hidden) closeDeleteModal();
-  if (!riskModalBackdrop.hidden) closeRiskModal();
   if (!noteModalBackdrop.hidden) closeNoteModal();
   if (!newProjectModalBackdrop.hidden) closeNewProjectModal();
   if (!personModalBackdrop.hidden) closePersonModal();
@@ -5735,11 +5701,6 @@ document.addEventListener("click", (e) => {
     renderProjectPanels();
     renderByPerson();
     selectProject(currentId);
-    return;
-  }
-  const editNoteEl = e.target.closest("[data-edit-note]");
-  if (editNoteEl){
-    openRiskModal(editNoteEl.dataset.editNote);
     return;
   }
   const newNoteBtn = e.target.closest("[data-new-note]");
