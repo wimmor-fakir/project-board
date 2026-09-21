@@ -57,10 +57,11 @@ when you open the live site** — all one-time, no-code steps:
    "date for next goals" (the same date applies to every project, editable
    at the top of the page).
 6. **Run `supabase-leave.sql`** too — creates the table behind the Leave
-   page (one row per person: BOP — Balance at start Of Period, entered
-   manually — plus their PaySpace Employee Number mapping. The page
-   computes EOP as BOP + 25 − PaySpace Applications for the current
-   cycle).
+   page (one row per person: BOP — Balance at start Of Period — and
+   PaySpace Entitlement, both entered manually (Entitlement defaults to
+   25), plus their PaySpace Employee Number mapping. The page computes
+   EOP as BOP + PaySpace Entitlement − PaySpace Applications for the
+   current cycle).
    - **Already ran an earlier version of this script** (from before the
      PaySpace Employee Number mapping existed)? Run
      `supabase-migration-leave-payspace-number.sql` once — it just adds
@@ -71,6 +72,11 @@ when you open the live site** — all one-time, no-code steps:
      `supabase-migration-leave-bop.sql` once — it adds the `bop` column
      without touching your old data (that old data just stops being
      read/written by the app).
+   - **Already ran an earlier version without the editable PaySpace
+     Entitlement field** (from when EOP used a flat 25 for everyone)?
+     Run `supabase-migration-leave-payspace-entitlement.sql` once — it
+     adds the `payspace_entitlement` column, defaulting every existing
+     row to 25 so nothing changes for anyone until you edit it.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -399,11 +405,12 @@ step 3 above to redeploy with the new value.
 
 ## Part 7 — Deploy the PaySpace Edge Function
 
-The Leave page can show read-only PaySpace figures (Annual leave
-entitlement and approved applications) alongside the numbers you enter
-manually, once each person's PaySpace Employee Number is set and you
-click **Sync from PaySpace**. This never writes anything back to
-PaySpace, and never overwrites your manually-entered fields.
+The Leave page can show each person's approved PaySpace Annual leave
+applications for the current cycle (read-only, used in the EOP
+calculation) once their PaySpace Employee Number is set and you click
+**Sync from PaySpace**. This never writes anything back to PaySpace,
+and never overwrites your manually-entered BOP or PaySpace Entitlement
+fields.
 
 **Why this needs an Edge Function:** every table in this app's database
 is readable by any signed-in user (page-access checkboxes only hide
@@ -434,11 +441,11 @@ never `index.html`.
 5. On the Leave page, click each person's "+ Add" under **PaySpace #**
    and enter their PaySpace Employee Number (find these in PaySpace's
    employee list) — this is a one-time mapping stored per person.
-6. Test it: click **Sync from PaySpace**. You should see PaySpace
-   Entitlement/Applications figures for anyone with a PaySpace # set
-   (some may stay blank — see the note on the page about PaySpace only
-   reporting entitlement for "Employee Defined" leave schemes; that's a
-   PaySpace-side limitation, not a bug).
+6. Test it: click **Sync from PaySpace**. You should see a PaySpace
+   Applications figure (click it to see the individual dates) for
+   anyone with a PaySpace # set — anyone without a match there, or
+   without a PaySpace # set, just shows "—" and their EOP can't be
+   computed until they do.
 
 **Never paste either credential into `index.html`, a commit, or this
 chat** — Supabase's secrets UI is the only place they should ever be
@@ -464,9 +471,10 @@ typed.
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
-| Run `supabase-leave.sql` too | Creates the table behind the Leave page (BOP + PaySpace # per person; EOP = BOP + 25 − PaySpace Applications) |
+| Run `supabase-leave.sql` too | Creates the table behind the Leave page (BOP + PaySpace Entitlement (default 25, both editable) + PaySpace # per person; EOP = BOP + PaySpace Entitlement − PaySpace Applications) |
 | Already had an earlier version without the PaySpace # column? Run `supabase-migration-leave-payspace-number.sql` once | Adds that column |
 | Already had an earlier version with entitlement/applications/adjustments instead of BOP? Run `supabase-migration-leave-bop.sql` once | Adds the `bop` column — old data is kept, just no longer read/written |
+| Already had BOP but a flat 25 instead of editable PaySpace Entitlement? Run `supabase-migration-leave-payspace-entitlement.sql` once | Adds the `payspace_entitlement` column, defaulting every row to 25 |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |

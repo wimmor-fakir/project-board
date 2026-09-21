@@ -4086,16 +4086,25 @@ async function renderGoals(){
 }
 
 /* ---------- Leave ---------- */
-const LEAVE_FLAT_ENTITLEMENT = 25; // days added to BOP for every person, every cycle
-let leaveBalances = {}; // leaveBalances[personName] = { bop, payspace_employee_number }
+const LEAVE_ENTITLEMENT_DEFAULT = 25; // default for payspace_entitlement when a person has no row yet
+let leaveBalances = {}; // leaveBalances[personName] = { bop, payspace_entitlement, payspace_employee_number }
 // Read-only reference data pulled from PaySpace on demand (see
 // syncPayspaceLeave) — keyed by PaySpace EmployeeNumber, never written
-// back and never overwrites bop.
+// back and never overwrites bop or payspace_entitlement.
 let payspaceLeaveData = null; // null until a sync has run; then { [employeeNumber]: { entitlement, applications } }
 let payspaceSyncError = null;
 let payspaceSyncing = false;
 function leaveBop(name){
   return (leaveBalances[name] && leaveBalances[name].bop) || 0;
+}
+// Despite the name (kept for continuity with the PaySpace Applications
+// column next to it), this is NOT synced from PaySpace — PaySpace's own
+// entitlement endpoint is often blank (see the payspace Edge Function's
+// comments), so this is a manually-entered per-person value instead,
+// defaulting to LEAVE_ENTITLEMENT_DEFAULT.
+function leavePayspaceEntitlement(name){
+  const v = leaveBalances[name] && leaveBalances[name].payspace_entitlement;
+  return (v === undefined || v === null) ? LEAVE_ENTITLEMENT_DEFAULT : v;
 }
 function leavePayspaceNumber(name){
   return (leaveBalances[name] && leaveBalances[name].payspace_employee_number) || "";
@@ -4104,13 +4113,13 @@ function payspaceDataFor(name){
   const num = leavePayspaceNumber(name);
   return (num && payspaceLeaveData && payspaceLeaveData[num]) || null;
 }
-// EOP = BOP + the flat entitlement - the PaySpace Applications total for
-// the current cycle. Only computable once that PaySpace figure is known
-// (a sync has run and found data for this person's PaySpace #).
+// EOP = BOP + PaySpace Entitlement - the PaySpace Applications total for
+// the current cycle. Only computable once that Applications figure is
+// known (a sync has run and found data for this person's PaySpace #).
 function leaveEopFor(name){
   const psData = payspaceDataFor(name);
   if (!psData) return null;
-  return leaveBop(name) + LEAVE_FLAT_ENTITLEMENT - psData.applications;
+  return leaveBop(name) + leavePayspaceEntitlement(name) - psData.applications;
 }
 function formatLeaveDays(n){
   const rounded = Math.round(n * 100) / 100;
@@ -4142,9 +4151,9 @@ function buildLeaveTable(){
         <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
         <td><span class="leave-cell-editable leave-payspace-number" data-edit-leave-payspace-number="${name}" data-value="${psNumber}" title="Click to set this person's PaySpace Employee Number">${psNumber || "+ Add"}</span></td>
         <td><span class="leave-cell-editable" data-edit-leave-bop="${name}" data-value="${leaveBop(name)}" title="Click to edit this person's Balance at start Of Period">${leaveBop(name)}</span></td>
-        <td class="mono leave-balance-cell" title="${psData ? "" : "Sync from PaySpace to compute — needs the PaySpace Applications total for this person"}">${eop === null ? "—" : formatLeaveDays(eop)}</td>
-        <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.entitlement) : "—"}</td>
+        <td><span class="leave-cell-editable" data-edit-leave-payspace-entitlement="${name}" data-value="${leavePayspaceEntitlement(name)}" title="Click to edit this person's entitlement for the current cycle">${leavePayspaceEntitlement(name)}</span></td>
         <td class="leave-payspace-cell leave-payspace-applications-cell">${buildApplicationDetailsHtml(psData)}</td>
+        <td class="mono leave-balance-cell" title="${psData ? "" : "Sync from PaySpace to compute — needs the PaySpace Applications total for this person"}">${eop === null ? "—" : formatLeaveDays(eop)}</td>
       </tr>`;
   }).join("");
   const wrap = document.createElement("div");
@@ -4159,9 +4168,9 @@ function buildLeaveTable(){
           <th class="leave-person-cell">Person</th>
           <th>PaySpace #</th>
           <th>BOP</th>
-          <th>EOP</th>
           <th>PaySpace Entitlement</th>
           <th>PaySpace Applications (1 May '26 – 30 Apr '27)</th>
+          <th>EOP</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -4169,8 +4178,11 @@ function buildLeaveTable(){
   `;
   return wrap.firstElementChild;
 }
+function newLeaveBalanceRow(){
+  return { bop: 0, payspace_entitlement: LEAVE_ENTITLEMENT_DEFAULT, payspace_employee_number: "" };
+}
 async function saveLeaveBop(name, value){
-  if (!leaveBalances[name]) leaveBalances[name] = { bop: 0, payspace_employee_number: "" };
+  if (!leaveBalances[name]) leaveBalances[name] = newLeaveBalanceRow();
   leaveBalances[name].bop = value;
   try {
     const { error } = await supabaseClient.from("leave_balances").upsert({
@@ -4184,8 +4196,23 @@ async function saveLeaveBop(name, value){
     alert("Couldn't save — has supabase-migration-leave-bop.sql been run yet? (" + e.message + ")");
   }
 }
+async function saveLeavePayspaceEntitlement(name, value){
+  if (!leaveBalances[name]) leaveBalances[name] = newLeaveBalanceRow();
+  leaveBalances[name].payspace_entitlement = value;
+  try {
+    const { error } = await supabaseClient.from("leave_balances").upsert({
+      person_name: name,
+      payspace_entitlement: value,
+      updated_by: authSession.user.email,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "person_name" });
+    if (error) throw error;
+  } catch (e) {
+    alert("Couldn't save — has supabase-migration-leave-payspace-entitlement.sql been run yet? (" + e.message + ")");
+  }
+}
 async function saveLeavePayspaceNumber(name, value){
-  if (!leaveBalances[name]) leaveBalances[name] = { bop: 0, payspace_employee_number: "" };
+  if (!leaveBalances[name]) leaveBalances[name] = newLeaveBalanceRow();
   leaveBalances[name].payspace_employee_number = value;
   try {
     const { error } = await supabaseClient.from("leave_balances").upsert({
@@ -4216,6 +4243,34 @@ function openInlineLeaveBopEditor(el, name){
     const value = isNaN(parsed) ? 0 : parsed;
     if (value !== parseFloat(el.dataset.value || "0")){
       await saveLeaveBop(name, value);
+    }
+    renderLeaveContent();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape"){ settled = true; renderLeaveContent(); }
+    else if (e.key === "Enter"){ commit(); }
+  });
+}
+function openInlineLeavePayspaceEntitlementEditor(el, name){
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "0.5";
+  input.className = "inline-date-input leave-cell-input";
+  input.value = el.dataset.value || String(LEAVE_ENTITLEMENT_DEFAULT);
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const parsed = parseFloat(input.value);
+    const value = isNaN(parsed) ? LEAVE_ENTITLEMENT_DEFAULT : parsed;
+    if (value !== parseFloat(el.dataset.value || String(LEAVE_ENTITLEMENT_DEFAULT))){
+      await saveLeavePayspaceEntitlement(name, value);
     }
     renderLeaveContent();
   };
@@ -4272,12 +4327,12 @@ async function syncPayspaceLeave(){
 function renderLeaveContent(){
   leavePanel.innerHTML = `
     <div class="summary-intro">
-      <p>BOP (Balance at start Of Period) per person. EOP = BOP + ${LEAVE_FLAT_ENTITLEMENT} − PaySpace Applications for the current cycle.</p>
+      <p>BOP (Balance at start Of Period) and PaySpace Entitlement (default ${LEAVE_ENTITLEMENT_DEFAULT}) are editable per person. EOP = BOP + PaySpace Entitlement − PaySpace Applications for the current cycle.</p>
       <button type="button" class="btn btn-new" id="refreshLeaveBtn">↻ Refresh</button>
     </div>
     <div class="leave-payspace-bar">
       <button type="button" class="btn btn-secondary" id="syncPayspaceBtn" ${payspaceSyncing ? "disabled" : ""}>${payspaceSyncing ? "Syncing…" : "⇅ Sync from PaySpace"}</button>
-      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications (1 May 2026 – 30 Apr 2027 only) — EOP needs that Applications figure, so it shows "—" until synced. Click a PaySpace Applications number to see the individual dates. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so that column can come back blank for others.</span>
+      <span class="field-hint">Set each person's PaySpace # below, then sync to see their approved PaySpace applications (1 May 2026 – 30 Apr 2027 only) — EOP needs that figure, so it shows "—" until synced. Click a PaySpace Applications number to see the individual dates.</span>
       ${payspaceSyncError ? `<p class="modal-error">Couldn't sync from PaySpace: ${payspaceSyncError} — has the payspace Edge Function been deployed, and are PAYSPACE_CLIENT_ID/PAYSPACE_CLIENT_SECRET set?</p>` : ""}
     </div>
     <div class="leave-table-card">
@@ -4305,6 +4360,7 @@ async function renderLeave(){
   (data || []).forEach(row => {
     leaveBalances[row.person_name] = {
       bop: Number(row.bop),
+      payspace_entitlement: row.payspace_entitlement != null ? Number(row.payspace_entitlement) : LEAVE_ENTITLEMENT_DEFAULT,
       payspace_employee_number: row.payspace_employee_number || "",
     };
   });
@@ -6136,6 +6192,11 @@ document.addEventListener("click", (e) => {
   const editLeaveBopEl = e.target.closest("[data-edit-leave-bop]");
   if (editLeaveBopEl){
     openInlineLeaveBopEditor(editLeaveBopEl, editLeaveBopEl.dataset.editLeaveBop);
+    return;
+  }
+  const editLeavePayspaceEntitlementEl = e.target.closest("[data-edit-leave-payspace-entitlement]");
+  if (editLeavePayspaceEntitlementEl){
+    openInlineLeavePayspaceEntitlementEditor(editLeavePayspaceEntitlementEl, editLeavePayspaceEntitlementEl.dataset.editLeavePayspaceEntitlement);
     return;
   }
   const editLeavePayspaceNumberEl = e.target.closest("[data-edit-leave-payspace-number]");
