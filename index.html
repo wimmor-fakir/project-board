@@ -4111,7 +4111,12 @@ function leavePayspaceNumber(name){
 }
 function payspaceDataFor(name){
   const num = leavePayspaceNumber(name);
-  return (num && payspaceLeaveData && payspaceLeaveData[num]) || null;
+  // null (shows "—") only when we genuinely can't know yet — no PaySpace #
+  // set, or no sync has run. Once synced with a # set, an employee simply
+  // absent from the results (no applications on record) counts as 0, not
+  // unknown — so EOP can still be computed instead of showing "—".
+  if (!num || !payspaceLeaveData) return null;
+  return payspaceLeaveData[num] || { entitlement: 0, applications: 0, application_details: [] };
 }
 // EOP = BOP + PaySpace Entitlement - the PaySpace Applications total for
 // the current cycle. Only computable once that Applications figure is
