@@ -22,6 +22,10 @@
 // anyone on a standard/default entitlement, PaySpace Entitlement will come
 // back empty here — that's a limitation of what PaySpace's API exposes,
 // not a bug in this function.
+//
+// Applications are scoped to the current leave cycle, 1 May 2026 to
+// 30 April 2027 (by each application's start date) — see CYCLE_START/
+// CYCLE_END below if that window ever needs to move to the next cycle.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -149,23 +153,45 @@ Deno.serve(async (req) => {
       fetchAllPages(companyId, "EmployeeLeaveApplication", auth.access_token),
     ]);
 
-    const annualEntitlements = entitlementRows.filter((e) => /annual/i.test(e.CompanyLeaveSetup || ""));
-    const approvedAnnualApplications = applicationRows.filter((a) => a.LeaveType === "Annual" && a.LeaveStatus === "Approved");
+    // Only the current leave cycle — 1 May 2026 to 30 April 2027 — going by
+    // each application's start date.
+    const CYCLE_START = "2026-05-01";
+    const CYCLE_END = "2027-04-30";
+    const inCycle = (dateStr: string) => {
+      const d = (dateStr || "").slice(0, 10);
+      return d >= CYCLE_START && d <= CYCLE_END;
+    };
 
-    const byEmployee: Record<string, { entitlement: number; applications: number; full_name?: string }> = {};
+    const annualEntitlements = entitlementRows.filter((e) => /annual/i.test(e.CompanyLeaveSetup || ""));
+    const approvedAnnualApplications = applicationRows.filter((a) =>
+      a.LeaveType === "Annual" && a.LeaveStatus === "Approved" && inCycle(a.LeaveStartDate)
+    );
+
+    type EmployeeLeave = {
+      entitlement: number;
+      applications: number;
+      full_name?: string;
+      application_details: Array<{ start: string; end: string; days: number }>;
+    };
+    const byEmployee: Record<string, EmployeeLeave> = {};
     annualEntitlements.forEach((e) => {
       const num = e.EmployeeNumber;
       if (!num) return;
-      if (!byEmployee[num]) byEmployee[num] = { entitlement: 0, applications: 0 };
+      if (!byEmployee[num]) byEmployee[num] = { entitlement: 0, applications: 0, application_details: [] };
       byEmployee[num].entitlement += Number(e.AccrualValue) || 0;
       byEmployee[num].full_name = e.FullName;
     });
     approvedAnnualApplications.forEach((a) => {
       const num = a.EmployeeNumber;
       if (!num) return;
-      if (!byEmployee[num]) byEmployee[num] = { entitlement: 0, applications: 0 };
-      byEmployee[num].applications += Number(a.NoOfDays) || 0;
+      if (!byEmployee[num]) byEmployee[num] = { entitlement: 0, applications: 0, application_details: [] };
+      const days = Number(a.NoOfDays) || 0;
+      byEmployee[num].applications += days;
       byEmployee[num].full_name = byEmployee[num].full_name || a.FullName;
+      byEmployee[num].application_details.push({ start: a.LeaveStartDate, end: a.LeaveEndDate, days });
+    });
+    Object.values(byEmployee).forEach((e) => {
+      e.application_details.sort((a, b) => a.start.localeCompare(b.start));
     });
 
     return jsonResponse({ company_id: companyId, employees: byEmployee });

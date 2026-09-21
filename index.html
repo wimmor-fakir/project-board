@@ -1025,6 +1025,21 @@
   }
   .leave-payspace-bar .field-hint{ flex:1; min-width:260px; margin:0; }
   .leave-payspace-bar .modal-error{ flex-basis:100%; }
+  .leave-payspace-applications-cell{ text-align:right; }
+  .leave-app-details summary{
+    cursor:pointer; color:var(--ink-3); list-style:none; display:inline-block;
+  }
+  .leave-app-details summary::-webkit-details-marker{ display:none; }
+  .leave-app-details summary:hover{ color:var(--accent); text-decoration:underline; }
+  .leave-app-details[open] summary{ color:var(--accent); font-weight:600; }
+  .leave-app-detail-list{
+    text-align:left; margin-top:6px; padding:8px 10px;
+    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
+    font-size:11.5px; white-space:normal;
+  }
+  .leave-app-detail-row{ display:flex; justify-content:space-between; gap:10px; padding:3px 0; }
+  .leave-app-detail-row + .leave-app-detail-row{ border-top:1px solid var(--border); }
+  .leave-app-detail-empty{ color:var(--ink-3); font-style:italic; justify-content:flex-start; }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -4103,6 +4118,19 @@ function formatLeaveDays(n){
 function formatPayspaceDays(n){
   return Math.round(n * 100) / 100;
 }
+function buildApplicationDetailsHtml(psData){
+  if (!psData) return "—";
+  const details = psData.application_details || [];
+  const rows = details.length
+    ? details.map(d => `<div class="leave-app-detail-row">${formatDateWithYear(d.start)} – ${formatDateWithYear(d.end)}<span class="mono">${formatPayspaceDays(d.days)}d</span></div>`).join("")
+    : `<div class="leave-app-detail-row leave-app-detail-empty">No applications in this cycle.</div>`;
+  return `
+    <details class="leave-app-details">
+      <summary class="mono">${formatPayspaceDays(psData.applications)}</summary>
+      <div class="leave-app-detail-list">${rows}</div>
+    </details>
+  `;
+}
 function buildLeaveTable(){
   const rows = PEOPLE_ORDER.map(name => {
     const cells = LEAVE_FIELDS.map(f => `
@@ -4117,7 +4145,7 @@ function buildLeaveTable(){
         ${cells}
         <td class="mono leave-balance-cell">${formatLeaveDays(leaveBalanceFor(name))}</td>
         <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.entitlement) : "—"}</td>
-        <td class="mono leave-payspace-cell">${psData ? formatPayspaceDays(psData.applications) : "—"}</td>
+        <td class="leave-payspace-cell leave-payspace-applications-cell">${buildApplicationDetailsHtml(psData)}</td>
       </tr>`;
   }).join("");
   const wrap = document.createElement("div");
@@ -4134,7 +4162,7 @@ function buildLeaveTable(){
           ${LEAVE_FIELDS.map(f => `<th>${f.label}</th>`).join("")}
           <th>Balance</th>
           <th>PaySpace Entitlement</th>
-          <th>PaySpace Applications</th>
+          <th>PaySpace Applications (1 May '26 – 30 Apr '27)</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -4250,7 +4278,7 @@ function renderLeaveContent(){
     </div>
     <div class="leave-payspace-bar">
       <button type="button" class="btn btn-secondary" id="syncPayspaceBtn" ${payspaceSyncing ? "disabled" : ""}>${payspaceSyncing ? "Syncing…" : "⇅ Sync from PaySpace"}</button>
-      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications for comparison — read-only, never overwrites the fields you edit here. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so this can come back blank for others.</span>
+      <span class="field-hint">Set each person's PaySpace # below, then sync to see their PaySpace Annual leave entitlement &amp; approved applications (1 May 2026 – 30 Apr 2027 only) for comparison — read-only, never overwrites the fields you edit here. Click a PaySpace Applications number to see the individual dates. PaySpace only reports an entitlement for employees whose leave scheme has "Employee Defined" enabled, so this can come back blank for others.</span>
       ${payspaceSyncError ? `<p class="modal-error">Couldn't sync from PaySpace: ${payspaceSyncError} — has the payspace Edge Function been deployed, and are PAYSPACE_CLIENT_ID/PAYSPACE_CLIENT_SECRET set?</p>` : ""}
     </div>
     <div class="leave-table-card">
