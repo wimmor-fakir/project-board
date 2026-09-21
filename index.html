@@ -747,6 +747,10 @@
     background:var(--ink-3); width:11px; height:11px; border-radius:50%;
     box-shadow: inset 0 0 0 2px var(--surface), inset 0 0 0 4px var(--ink-3), inset 0 0 0 6px var(--surface);
   }
+  .tab-dot.leave-dot{
+    background:var(--ink-3); width:11px; height:11px;
+    clip-path: polygon(0 0, 60% 0, 100% 50%, 60% 100%, 0 100%, 40% 50%);
+  }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -1766,6 +1770,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "teamupdate", label: "Team Update" },
   { key: "forecasting", label: "Forecasting" },
   { key: "goals", label: "Goals" },
+  { key: "leave", label: "Leave" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2346,6 +2351,24 @@ function renderRail(){
     rail.appendChild(goalsTab);
   }
 
+  if (hasPageAccess("leave")){
+    const leaveTab = document.createElement("button");
+    leaveTab.className = "tab";
+    leaveTab.role = "tab";
+    leaveTab.id = "tab-leave";
+    leaveTab.dataset.id = "leave";
+    leaveTab.setAttribute("aria-controls", "panel-leave");
+    leaveTab.innerHTML = `
+      <span class="tab-dot leave-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Leave</div>
+        <div class="tab-meta">Coming soon</div>
+      </span>
+    `;
+    leaveTab.addEventListener("click", () => selectProject("leave"));
+    rail.appendChild(leaveTab);
+  }
+
   const divider = document.createElement("div");
   divider.className = "rail-divider";
   rail.appendChild(divider);
@@ -2824,6 +2847,13 @@ goalsPanel.id = "panel-goals";
 goalsPanel.role = "tabpanel";
 goalsPanel.setAttribute("aria-labelledby", "tab-goals");
 panelsEl.appendChild(goalsPanel);
+
+const leavePanel = document.createElement("section");
+leavePanel.className = "panel";
+leavePanel.id = "panel-leave";
+leavePanel.role = "tabpanel";
+leavePanel.setAttribute("aria-labelledby", "tab-leave");
+panelsEl.appendChild(leavePanel);
 
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
@@ -3998,6 +4028,24 @@ async function renderGoals(){
   renderGoalsContent();
 }
 
+/* ---------- Leave ---------- */
+// Placeholder page — the real leave-tracking UI (likely backed by the
+// PaySpace API) isn't built yet; see DEPLOYMENT.md for how to store the
+// PaySpace client_id/client_secret needed for that later.
+function renderLeave(){
+  if (!hasPageAccess("leave")) return;
+  if (!supabaseClient || !authSession){
+    leavePanel.innerHTML = `<p class="summary-facts">Sign in to see leave.</p>`;
+    return;
+  }
+  leavePanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Leave tracking is coming soon.</p>
+    </div>
+    <p class="summary-facts">Nothing here yet — this page is reserved for upcoming leave tracking.</p>
+  `;
+}
+
 function renderSettings(){
   if (!hasPageAccess("settings")) return;
   const healthRows = HEALTH_OPTIONS.map(opt => buildSettingsStatusRow(
@@ -4496,7 +4544,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals" && panel.id !== "panel-leave") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -4567,6 +4615,10 @@ function selectProject(id){
     mainTitleEl.textContent = "Goals";
     document.getElementById("crumb").textContent = "Overview";
     renderGoals();
+  } else if (id === "leave"){
+    mainTitleEl.textContent = "Leave";
+    document.getElementById("crumb").textContent = "Overview";
+    renderLeave();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);

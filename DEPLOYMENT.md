@@ -62,7 +62,7 @@ when you open the live site** — all one-time, no-code steps:
 7. **Deploy the `manage-users` Edge Function** — see Part 5 below. This
    powers the Settings page's "User management" section (invite/remove
    people, and who can see Settings/Activity/SIM Cards/Team Update/
-   Forecasting/Goals); everything else works without it.
+   Forecasting/Goals/Leave); everything else works without it.
 
 Once the first six are done, push the code (see Part 1) and the live
 site will save, sync, and log activity for real, for anyone you've
@@ -279,11 +279,11 @@ only if a specific need for something more restrictive comes up.
 
 The Settings page has an admin-only "User management" section (invite
 people by email, remove accounts, and tick which of the Settings,
-Activity, SIM Cards, Team Update, Forecasting, and Goals pages each
-person can see). It only works for the account whose email matches
+Activity, SIM Cards, Team Update, Forecasting, Goals, and Leave pages
+each person can see). It only works for the account whose email matches
 `ADMIN_EMAIL` in `supabase-edge-function/manage-users.ts` (currently
 `wim@hawktivity.com`) — everyone else won't even see that section.
-By default, nobody but the admin can see any of those six pages —
+By default, nobody but the admin can see any of those seven pages —
 that's controlled by the checkboxes in this section, one tick per
 person per page.
 
@@ -310,13 +310,13 @@ still letting the app call it safely over the internet.
    a list of current users instead of an error.
 
 **Already had this function deployed before per-page access existed
-(or before Team Update, Forecasting, or Goals were added)?** Re-copy
-`supabase-edge-function/manage-users.ts` into it and redeploy (steps
-4-5 above) to pick up the checkboxes. One consequence worth knowing:
-the moment this redeploys, everyone except the admin loses access to
-Settings, Activity, SIM Cards, Team Update, Forecasting, and Goals
-until you re-tick the pages they should keep seeing — nothing else
-about their account changes.
+(or before Team Update, Forecasting, Goals, or Leave were added)?**
+Re-copy `supabase-edge-function/manage-users.ts` into it and redeploy
+(steps 4-5 above) to pick up the checkboxes. One consequence worth
+knowing: the moment this redeploys, everyone except the admin loses
+access to Settings, Activity, SIM Cards, Team Update, Forecasting,
+Goals, and Leave until you re-tick the pages they should keep seeing —
+nothing else about their account changes.
 
 Before inviting anyone from this section, make sure Part 4 step 4 (Site
 URL / Redirect URLs pointing at your real site, not `localhost:3000`) is
@@ -382,6 +382,44 @@ step 3 above to redeploy with the new value.
 
 ---
 
+## Part 7 — Store your PaySpace API credentials (for later)
+
+The **Leave** tab in the rail is just a placeholder for now — nothing
+reads these credentials yet. This step only stashes your
+[PaySpace](https://developer.payspace.com/#api-urls) `client_id` and
+`client_secret` somewhere secure ahead of time, so they're ready
+whenever the actual leave-tracking integration gets built.
+
+**Why not a database table:** every table in this app's database is
+readable by any signed-in user (page-access checkboxes only hide tabs
+in the browser — they're not a real security boundary; see the note
+in Part 5). A PaySpace `client_secret` is a real credential that can
+pull your company's payroll/HR data, so it needs the same treatment as
+the SIMcontrol key and the service_role key above: a Supabase Edge
+Function secret, which only server-side function code can ever read —
+never a table, and never `index.html`.
+
+1. In your Supabase project, go to **Edge Functions → Manage secrets**
+   (this is project-wide, so you don't need a `payspace` function to
+   exist yet — the CLI works too: `supabase secrets set`).
+2. Add two secrets:
+   - `PAYSPACE_CLIENT_ID` = your PaySpace API client ID
+   - `PAYSPACE_CLIENT_SECRET` = your PaySpace API client secret
+   (Find both in your PaySpace account under its API/integration
+   settings — see the [API docs](https://developer.payspace.com/#api-urls)
+   for where PaySpace surfaces them.)
+3. That's it for now. When you're ready to build the actual Leave page
+   against PaySpace's API, a new Edge Function (e.g. `payspace`) reads
+   these two with `Deno.env.get("PAYSPACE_CLIENT_ID")` /
+   `Deno.env.get("PAYSPACE_CLIENT_SECRET")`, exactly like `sim-cards.ts`
+   reads `SIMCONTROL_API_KEY` above — ask for that whenever you want it
+   built.
+
+**Never paste either value into `index.html`, a commit, or this chat**
+— Supabase's secrets UI is the only place they should ever be typed.
+
+---
+
 ## Quick reference — what you have after this guide
 
 | Thing | Where |
@@ -404,6 +442,7 @@ step 3 above to redeploy with the new value.
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
 | Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
+| Set `PAYSPACE_CLIENT_ID` / `PAYSPACE_CLIENT_SECRET` as Supabase secrets (Part 7, optional) | Stashes PaySpace API credentials securely ahead of the future Leave-page integration — nothing reads them yet |
 
 ## Making future changes
 
