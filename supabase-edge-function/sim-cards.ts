@@ -249,6 +249,8 @@ Deno.serve(async (req) => {
         avg_daily_usage_mb: avgDailyUsageMb,
         yesterday_usage_mb: yesterdayUsageMb,
         expected_runout_date: expectedRunoutDate,
+        runout_due_to_recharge_date: bundleExpiryDate,
+        runout_due_to_usage_date: balanceRunoutDate,
         last_recharge_date: lastRecharge,
         created: sim.created,
       });
