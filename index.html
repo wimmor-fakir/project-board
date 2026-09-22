@@ -1100,8 +1100,6 @@
   .simcards-table td:first-child{ white-space:normal; max-width:220px; }
   .simcard-name{ font-weight:700; font-size:13px; }
   .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
-  .simcard-recharge-editable{ cursor:pointer; }
-  .simcard-recharge-editable:hover{ text-decoration:underline; }
   .simcard-flag-badge{
     display:inline-flex; align-items:center; margin-left:8px; padding:2px 7px;
     border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase;
@@ -3194,12 +3192,7 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
     <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}${isMostUsed ? '<span class="simcard-flag-badge" title="Most data used yesterday">Most used</span>' : ""}</td>
     <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}${isSoonestRunout ? '<span class="simcard-flag-badge" title="Earliest expected data run-out">Soonest</span>' : ""}</td>
-    <td class="mono" title="The later of SIMcontrol's own record and the override below — this is what's actually used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
-    <td>
-      <span class="simcard-recharge-editable" data-edit-sim-recharge="${sim.msisdn}" data-value="${sim.recharge_override_date || ""}" title="Click to set a manual override for the last recharge date">
-        ${sim.recharge_override_date ? formatDateWithYear(sim.recharge_override_date) : "No override set"}
-      </span>
-    </td>
+    <td class="mono" title="A day where balance is higher than the day before is treated as a recharge; falls back to SIMcontrol's own recharge record if none is found. Used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
   `;
   return row;
 }
@@ -3213,7 +3206,6 @@ const SIMCARD_COLUMNS = [
   { key: "yesterday", label: "Yesterday's usage", sortValue: sim => sim.yesterday_usage_mb || 0 },
   { key: "runout", label: "Expected data runout", sortValue: sim => sim.expected_runout_date || "" },
   { key: "calculatedRecharge", label: "Latest Calculated Data Recharge", sortValue: sim => sim.last_recharge_date || "" },
-  { key: "recharge", label: "Override Last Data Recharge", sortValue: sim => sim.recharge_override_date || "" },
 ];
 let simCardsData = [];
 let simCardsSortKey = "name";
@@ -5346,44 +5338,6 @@ function openInlineOwnerEditor(ownerEl, projectId){
   });
 }
 
-async function saveSimRechargeOverride(msisdn, dateStr){
-  try {
-    await supabaseClient.from("sim_recharge_overrides").upsert({
-      msisdn,
-      last_recharge_date: dateStr,
-      updated_by: authSession.user.email,
-    });
-  } catch (e) { /* best-effort — renderSimCards will just show whatever comes back */ }
-}
-function openInlineSimRechargeEditor(el, msisdn){
-  const input = document.createElement("input");
-  input.type = "date";
-  input.className = "inline-date-input";
-  input.value = el.dataset.value || "";
-  el.replaceWith(input);
-  input.focus();
-  if (input.showPicker){
-    try { input.showPicker(); } catch (err) {}
-  }
-  let settled = false;
-  const commit = async () => {
-    if (settled) return;
-    settled = true;
-    if (input.value && input.value !== el.dataset.value){
-      await saveSimRechargeOverride(msisdn, input.value);
-    }
-    renderSimCards();
-  };
-  input.addEventListener("change", commit);
-  input.addEventListener("blur", commit);
-  input.addEventListener("click", (e) => e.stopPropagation());
-  input.addEventListener("keydown", (e) => {
-    e.stopPropagation();
-    if (e.key === "Escape"){ settled = true; renderSimCards(); }
-    else if (e.key === "Enter"){ commit(); }
-  });
-}
-
 function allPeopleNames(){
   return Array.from(new Set(PEOPLE_ORDER)).sort();
 }
@@ -6337,11 +6291,6 @@ document.addEventListener("click", (e) => {
   const editOwnerEl = e.target.closest("[data-edit-owner]");
   if (editOwnerEl){
     openInlineOwnerEditor(editOwnerEl, editOwnerEl.dataset.editOwner);
-    return;
-  }
-  const editSimRechargeEl = e.target.closest("[data-edit-sim-recharge]");
-  if (editSimRechargeEl){
-    openInlineSimRechargeEditor(editSimRechargeEl, editSimRechargeEl.dataset.editSimRecharge);
     return;
   }
   const editForecastEl = e.target.closest("[data-edit-forecast]");
