@@ -1313,6 +1313,7 @@
       <button class="modal-close" id="itemModalClose" aria-label="Close" type="button">×</button>
     </div>
     <div class="modal-body">
+      <p class="field-hint" id="itemModalMeta" hidden></p>
       <label class="field">
         <span>Description</span>
         <textarea id="fieldText" rows="3"></textarea>
@@ -5290,6 +5291,7 @@ function allCompanyNames(){
 
 const itemModalBackdrop = document.getElementById("itemModalBackdrop");
 const itemModalTitle = document.getElementById("itemModalTitle");
+const itemModalMeta = document.getElementById("itemModalMeta");
 const fieldText = document.getElementById("fieldText");
 const fieldDate = document.getElementById("fieldDate");
 const itemStatusChips = document.getElementById("itemStatusChips");
@@ -5417,6 +5419,13 @@ function openItemModal({ id, projectId } = {}){
     pendingItemPeople = [...item.people];
     pendingItemProjects = [...item.projectIds];
     itemModalDelete.hidden = false;
+    // Older items saved before this field existed have no createdBy/createdAt.
+    if (item.createdBy && item.createdAt){
+      itemModalMeta.textContent = "Created by " + item.createdBy + " on " + formatChangeTimestamp(item.createdAt);
+      itemModalMeta.hidden = false;
+    } else {
+      itemModalMeta.hidden = true;
+    }
   } else {
     editingItemId = null;
     itemModalTitle.textContent = "New action item";
@@ -5426,6 +5435,7 @@ function openItemModal({ id, projectId } = {}){
     pendingItemPeople = [];
     pendingItemProjects = projectId ? [projectId] : (PROJECTS[0] ? [PROJECTS[0].id] : []);
     itemModalDelete.hidden = true;
+    itemModalMeta.hidden = true;
   }
   renderItemStatusChips();
   renderItemPeopleChips();
@@ -5473,7 +5483,11 @@ function saveItemModal(){
   } else {
     const primaryProject = PROJECTS.find(p => p.id === projectIds[0]);
     const code = nextActionCode(primaryProject ? primaryProject.code : null);
-    const newItem = { date, text, status, people, projectIds, _id: ITEM_ID_SEQ++, code };
+    const newItem = {
+      date, text, status, people, projectIds, _id: ITEM_ID_SEQ++, code,
+      createdBy: authSession.user.email,
+      createdAt: new Date().toISOString(),
+    };
     ACTIONS.push(newItem);
     logActionChange(newItem._id, newItem.code, "created", "Created: " + text);
   }
