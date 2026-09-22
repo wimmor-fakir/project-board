@@ -129,16 +129,22 @@ Deno.serve(async (req) => {
 
     const sims = await fetchAllPages("/sims", apiKey);
 
-    // Last 7 full days (yesterday back through 7 days ago) — one usage call
-    // per day, each covering every SIM at once. recentDays[0] is yesterday,
-    // which doubles as the "yesterday's usage" figure.
-    const recentDays: string[] = [];
-    for (let i = 1; i <= 7; i++) recentDays.push(toDateStr(new Date(Date.now() - i * 86400000)));
+    // Yesterday back through 35 days ago — one usage call per day, each
+    // covering every SIM at once. historyDays[0] is yesterday. 35 days
+    // (not just 7) so recharge detection below has enough runway: bundles
+    // are valid ~30 days, so a recharge should fall somewhere in this
+    // window even if it happened a few weeks ago. The 7-day average-usage
+    // figure reuses the first slice of this same fetch rather than calling
+    // the API again.
+    const RECHARGE_LOOKBACK_DAYS = 35;
+    const historyDays: string[] = [];
+    for (let i = 1; i <= RECHARGE_LOOKBACK_DAYS; i++) historyDays.push(toDateStr(new Date(Date.now() - i * 86400000)));
     const usageByDate: Record<string, Record<string, any>> = {};
-    for (const day of recentDays) {
+    for (const day of historyDays) {
       usageByDate[day] = ((await simControlGet(`/usage?start_date=${day}&end_date=${day}`, apiKey)).data) || {};
     }
-    const yesterday = recentDays[0];
+    const yesterday = historyDays[0];
+    const recentDays = historyDays.slice(0, 7);
 
     // Wide window — this account may have no recharges yet, which is fine.
     const recharges = await fetchAllPages(`/recharge?start_date=2000-01-01&end_date=${today}`, apiKey);
@@ -156,26 +162,60 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Kept separate from lastRechargeByMsisdn (SIMcontrol's own record) so
-    // the app can show both the raw manual override and the calculated
-    // date (the later of the two) as distinct columns.
+    // UNVERIFIED: the field name SIMcontrol uses for a day's balance on the
+    // /usage record hasn't been confirmed against a real response (the API
+    // docs only describe `data` as an untyped object) — check a few likely
+    // spellings. If none of them are present, balanceJumpRechargeDate below
+    // simply finds nothing for that SIM and the /recharge-endpoint value is
+    // used instead. Verify/adjust this once deployed against real data.
+    function extractBalanceMb(entry: any): number | null {
+      const raw = entry?.data_balance_in_mb ?? entry?.balance_mb ?? entry?.balance
+        ?? entry?.closing_balance_mb ?? entry?.closing_balance ?? entry?.remaining_balance_mb;
+      if (raw === undefined || raw === null) return null;
+      const n = parseFloat(String(raw));
+      return isNaN(n) ? null : n;
+    }
+    // A recharge shows up as the balance being higher than the reading
+    // before it (balance otherwise only ever goes down, from usage). Walks
+    // today's live balance back through the lookback window, newest first,
+    // and returns the date of the first (most recent) such jump.
+    function balanceJumpRechargeDate(msisdn: string, todayBalanceMb: number): string | null {
+      const series: { date: string; balance: number }[] = [{ date: today, balance: todayBalanceMb }];
+      for (const day of historyDays) {
+        const bal = extractBalanceMb(usageByDate[day][msisdn]);
+        if (bal !== null) series.push({ date: day, balance: bal });
+      }
+      for (let i = 0; i < series.length - 1; i++) {
+        if (series[i].balance > series[i + 1].balance) return series[i].date;
+      }
+      return null;
+    }
+
+    // Kept separate from lastRechargeByMsisdn (SIMcontrol's own /recharge
+    // record) so the app can show both the raw manual override and the
+    // calculated date as distinct columns.
     const overrideByMsisdn: Record<string, string> = {};
     const { data: overrideRows } = await adminClient.from("sim_recharge_overrides").select("msisdn, last_recharge_date");
     (overrideRows || []).forEach((o: { msisdn: string; last_recharge_date: string }) => {
       overrideByMsisdn[o.msisdn] = o.last_recharge_date;
     });
-    function effectiveRecharge(msisdn: string): string | null {
-      const fromSimControl = lastRechargeByMsisdn[msisdn] || null;
+    // "Calculated" prefers the balance-jump date (see above); if that finds
+    // nothing (e.g. the balance field guess above is wrong, or no jump fell
+    // inside the lookback window) it falls back to the /recharge endpoint's
+    // own record. Either way, the later of that and a manual override wins.
+    function effectiveRecharge(msisdn: string, todayBalanceMb: number): string | null {
+      const calculated = balanceJumpRechargeDate(msisdn, todayBalanceMb) || lastRechargeByMsisdn[msisdn] || null;
       const override = overrideByMsisdn[msisdn] || null;
-      if (fromSimControl && override) return fromSimControl > override ? fromSimControl : override;
-      return fromSimControl || override;
+      if (calculated && override) return calculated > override ? calculated : override;
+      return calculated || override;
     }
 
     const results = [];
     for (const sim of sims) {
       const msisdn = sim.msisdn;
-      const lastRecharge = effectiveRecharge(msisdn);
       const simCreatedDate = toDateStr(new Date(sim.created));
+      const balanceMb = num(sim.data_balance_in_mb);
+      const lastRecharge = effectiveRecharge(msisdn, balanceMb);
 
       // Only count days the SIM actually existed for.
       const last7DaysUsage = recentDays
@@ -183,7 +223,6 @@ Deno.serve(async (req) => {
         .map((day) => num((usageByDate[day][msisdn] || {}).data_usage));
       const avgDailyUsageMb = averageExcludingOutliers(last7DaysUsage);
 
-      const balanceMb = num(sim.data_balance_in_mb);
       const yesterdayUsageMb = num((usageByDate[yesterday][msisdn] || {}).data_usage);
 
       // Candidate 1: projecting the current balance forward at the average
