@@ -3194,9 +3194,10 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
     <td class="mono">${formatDataMb(sim.avg_daily_usage_mb)}</td>
     <td class="mono">${formatDataMb(sim.yesterday_usage_mb)}${isMostUsed ? '<span class="simcard-flag-badge" title="Most data used yesterday">Most used</span>' : ""}</td>
     <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}${isSoonestRunout ? '<span class="simcard-flag-badge" title="Earliest expected data run-out">Soonest</span>' : ""}</td>
+    <td class="mono" title="The later of SIMcontrol's own record and the override below — this is what's actually used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
     <td>
-      <span class="simcard-recharge-editable" data-edit-sim-recharge="${sim.msisdn}" data-value="${sim.last_recharge_date || ""}" title="Click to set the last recharge date">
-        ${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "No recharge yet"}
+      <span class="simcard-recharge-editable" data-edit-sim-recharge="${sim.msisdn}" data-value="${sim.recharge_override_date || ""}" title="Click to set a manual override for the last recharge date">
+        ${sim.recharge_override_date ? formatDateWithYear(sim.recharge_override_date) : "No override set"}
       </span>
     </td>
   `;
@@ -3211,7 +3212,8 @@ const SIMCARD_COLUMNS = [
   { key: "avg", label: "Avg usage / day", sortValue: sim => sim.avg_daily_usage_mb || 0 },
   { key: "yesterday", label: "Yesterday's usage", sortValue: sim => sim.yesterday_usage_mb || 0 },
   { key: "runout", label: "Expected data runout", sortValue: sim => sim.expected_runout_date || "" },
-  { key: "recharge", label: "Last data recharge", sortValue: sim => sim.last_recharge_date || "" },
+  { key: "calculatedRecharge", label: "Latest Calculated Data Recharge", sortValue: sim => sim.last_recharge_date || "" },
+  { key: "recharge", label: "Override Last Data Recharge", sortValue: sim => sim.recharge_override_date || "" },
 ];
 let simCardsData = [];
 let simCardsSortKey = "name";
