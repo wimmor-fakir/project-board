@@ -1059,20 +1059,20 @@
   .leave-calendar-scroll::-webkit-scrollbar{ height:8px; width:8px; }
   .leave-calendar-scroll::-webkit-scrollbar-track{ background:transparent; }
   .leave-calendar-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
-  .leave-calendar-table{ border-collapse:collapse; }
+  .leave-calendar-table{ border-collapse:collapse; width:100%; table-layout:fixed; }
   .leave-calendar-table th{
     font-size:10px; font-weight:600; color:var(--ink-3);
     position:sticky; top:0; background:var(--surface); z-index:2;
   }
-  .leave-calendar-day-header{ width:22px; min-width:22px; text-align:center; padding:2px 0; }
-  .leave-calendar-month-header{ position:sticky; left:0; z-index:3; }
+  .leave-calendar-day-header{ width:auto; text-align:center; padding:2px 0; }
+  .leave-calendar-month-header{ position:sticky; left:0; z-index:3; width:76px; }
   .leave-calendar-month-cell{
-    position:sticky; left:0; background:var(--surface); z-index:1;
+    position:sticky; left:0; background:var(--surface); z-index:1; width:76px;
     font-size:12px; font-weight:600; white-space:nowrap; text-align:left;
     padding:2px 12px 2px 2px; border-right:1px solid var(--border);
   }
   .leave-calendar-day{
-    width:22px; min-width:22px; height:24px; padding:1px;
+    height:24px; padding:1px;
     border:1px solid var(--border);
   }
   .leave-calendar-day-blank{ background:var(--surface-sunken); border-color:var(--surface-sunken); }
