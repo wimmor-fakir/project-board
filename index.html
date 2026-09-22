@@ -3983,7 +3983,7 @@ function buildGoalsTable(){
       const text = goalText(p.id, slot);
       return `<td><span class="goals-cell-editable" data-edit-goal="${p.id}" data-goal-slot="${slot}" title="Click to edit this goal">${text || "+ Add goal"}</span></td>`;
     }).join("");
-    return `<tr><td class="goals-project-cell"><span class="project-link" data-goto-project="${p.id}" title="Open ${p.name}">${p.name}</span></td>${cells}</tr>`;
+    return `<tr><td class="goals-project-cell"><span class="project-link" data-goto-project="${p.id}" title="Open ${p.name}">${p.name}</span></td><td>${ownerBadgeHtml(p)}</td>${cells}</tr>`;
   }).join("");
   const wrap = document.createElement("div");
   if (!filteredProjects.length){
@@ -3993,7 +3993,7 @@ function buildGoalsTable(){
   wrap.innerHTML = `
     <table class="goals-table">
       <thead>
-        <tr><th class="goals-project-cell">Project</th><th>Goal 1</th><th>Goal 2</th><th>Goal 3</th></tr>
+        <tr><th class="goals-project-cell">Project</th><th>Owner</th><th>Goal 1</th><th>Goal 2</th><th>Goal 3</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
