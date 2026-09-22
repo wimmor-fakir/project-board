@@ -156,11 +156,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // A manually-set date (from the SIM Cards page's "click to edit") always
-    // wins over whatever SIMcontrol's own API reports for that SIM.
+    // The later of a manually-set date (from the SIM Cards page's "click to
+    // edit") and whatever SIMcontrol's own API reports for that SIM is used.
     const { data: overrideRows } = await adminClient.from("sim_recharge_overrides").select("msisdn, last_recharge_date");
     (overrideRows || []).forEach((o: { msisdn: string; last_recharge_date: string }) => {
-      lastRechargeByMsisdn[o.msisdn] = o.last_recharge_date;
+      if (!lastRechargeByMsisdn[o.msisdn] || o.last_recharge_date > lastRechargeByMsisdn[o.msisdn]) {
+        lastRechargeByMsisdn[o.msisdn] = o.last_recharge_date;
+      }
     });
 
     const results = [];
@@ -188,7 +190,7 @@ Deno.serve(async (req) => {
         balanceRunoutDate = toDateStr(d);
       }
       // Candidate 2: the data bundle's own 30-day validity window from the
-      // last recharge (manual override, if set, otherwise SIMcontrol's own
+      // last recharge (the later of a manual override and SIMcontrol's own
       // record of it) — data is lost at this point even if balance remains.
       const bundleExpiryDate = lastRecharge ? addDays(lastRecharge, 30) : null;
 
