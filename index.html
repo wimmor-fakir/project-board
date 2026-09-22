@@ -3247,8 +3247,6 @@ const TEAM_UPDATE_QUESTIONS = [
   { key: "needs_help", label: "Do you need help with anything?", note: "Leave blank if not", placeholder: "e.g. Stuck on the recharge API", required: false },
 ];
 function formatTeamUpdateDayHeading(dateStr){
-  if (dateStr === TODAY_STR) return "Today";
-  if (dateStr === dateOffsetStr(-1)) return "Yesterday";
   return formatDateWithYear(dateStr);
 }
 function buildTeamUpdateRow(entry){
