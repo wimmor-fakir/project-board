@@ -1045,6 +1045,39 @@
   .leave-app-detail-row{ display:flex; justify-content:space-between; gap:10px; padding:3px 0; }
   .leave-app-detail-row + .leave-app-detail-row{ border-top:1px solid var(--border); }
   .leave-app-detail-empty{ color:var(--ink-3); font-style:italic; justify-content:flex-start; }
+  .leave-calendar-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:18px; margin-top:16px;
+  }
+  .leave-calendar-legend{ display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:14px; }
+  .leave-calendar-legend-item{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-2); }
+  .leave-calendar-legend-dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .leave-calendar-scroll{
+    overflow:auto; max-height:60vh;
+    scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent;
+  }
+  .leave-calendar-scroll::-webkit-scrollbar{ height:8px; width:8px; }
+  .leave-calendar-scroll::-webkit-scrollbar-track{ background:transparent; }
+  .leave-calendar-scroll::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:999px; }
+  .leave-calendar-table{ border-collapse:collapse; }
+  .leave-calendar-table th{
+    font-size:10px; font-weight:600; color:var(--ink-3);
+    position:sticky; top:0; background:var(--surface); z-index:2;
+  }
+  .leave-calendar-day-header{ width:22px; min-width:22px; text-align:center; padding:2px 0; }
+  .leave-calendar-month-header{ position:sticky; left:0; z-index:3; }
+  .leave-calendar-month-cell{
+    position:sticky; left:0; background:var(--surface); z-index:1;
+    font-size:12px; font-weight:600; white-space:nowrap; text-align:left;
+    padding:2px 12px 2px 2px; border-right:1px solid var(--border);
+  }
+  .leave-calendar-day{
+    width:22px; min-width:22px; height:24px; padding:1px;
+    border:1px solid var(--border);
+  }
+  .leave-calendar-day-blank{ background:var(--surface-sunken); border-color:var(--surface-sunken); }
+  .leave-calendar-day-marks{ display:flex; flex-direction:column; height:100%; gap:1px; }
+  .leave-calendar-stripe{ flex:1; min-height:2px; border-radius:1px; }
 
   /* ---------- SIM Cards panel ---------- */
   .simcards-table-wrap{
@@ -4177,6 +4210,75 @@ function buildApplicationDetailsHtml(psData){
     </details>
   `;
 }
+// One row per month, 1 May 2026 – 30 Apr 2027 — matches the PaySpace sync
+// cycle used everywhere else on this page.
+const LEAVE_CALENDAR_MONTHS = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(2026, 4 + i, 1)).toISOString().slice(0, 10));
+const LEAVE_CALENDAR_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-other)"];
+function daysInLeaveCalendarMonth(monthStr){
+  const [y, m] = monthStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+function addDaysToDateStr(dateStr, days){
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function buildLeaveCalendar(){
+  const wrap = document.createElement("div");
+  const peopleWithLeave = PEOPLE_ORDER
+    .map(name => ({ name, details: (payspaceDataFor(name) || {}).application_details || [] }))
+    .filter(p => p.details.length > 0);
+  if (!peopleWithLeave.length){
+    wrap.innerHTML = `<p class="summary-facts">No PaySpace leave applications found yet for this cycle — sync from PaySpace above to populate this calendar.</p>`;
+    return wrap.firstElementChild;
+  }
+
+  // date string -> [{ name, color }] for everyone on leave that day
+  const byDate = new Map();
+  peopleWithLeave.forEach((p, i) => {
+    const color = LEAVE_CALENDAR_COLORS[i % LEAVE_CALENDAR_COLORS.length];
+    p.details.forEach(d => {
+      for (let cur = d.start; cur <= d.end; cur = addDaysToDateStr(cur, 1)){
+        if (!byDate.has(cur)) byDate.set(cur, []);
+        byDate.get(cur).push({ name: p.name, color });
+      }
+    });
+  });
+
+  const legendHtml = peopleWithLeave.map((p, i) => `
+    <span class="leave-calendar-legend-item"><span class="leave-calendar-legend-dot" style="background:${LEAVE_CALENDAR_COLORS[i % LEAVE_CALENDAR_COLORS.length]}"></span>${p.name}</span>
+  `).join("");
+
+  const dayHeaderCells = Array.from({ length: 31 }, (_, i) => `<th class="leave-calendar-day-header">${i + 1}</th>`).join("");
+
+  const monthRows = LEAVE_CALENDAR_MONTHS.map(monthStr => {
+    const nDays = daysInLeaveCalendarMonth(monthStr);
+    const label = new Date(monthStr + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    const dayCells = Array.from({ length: 31 }, (_, i) => {
+      const day = i + 1;
+      if (day > nDays) return `<td class="leave-calendar-day leave-calendar-day-blank"></td>`;
+      const dateStr = monthStr.slice(0, 8) + String(day).padStart(2, "0");
+      const onLeave = byDate.get(dateStr) || [];
+      const stripes = onLeave.map(p => `<span class="leave-calendar-stripe" style="background:${p.color}"></span>`).join("");
+      const title = onLeave.length ? onLeave.map(p => p.name).join(", ") : "";
+      return `<td class="leave-calendar-day" title="${title}"><div class="leave-calendar-day-marks">${stripes}</div></td>`;
+    }).join("");
+    return `<tr><td class="leave-calendar-month-cell">${label}</td>${dayCells}</tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <div>
+      <div class="leave-calendar-legend">${legendHtml}</div>
+      <div class="leave-calendar-scroll">
+        <table class="leave-calendar-table">
+          <thead><tr><th class="leave-calendar-month-header"></th>${dayHeaderCells}</tr></thead>
+          <tbody>${monthRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  return wrap.firstElementChild;
+}
 function buildLeaveTable(){
   const rows = PEOPLE_ORDER.map(name => {
     const psNumber = leavePayspaceNumber(name);
@@ -4376,10 +4478,17 @@ function renderLeaveContent(){
     <div class="leave-table-card">
       <div class="leave-table-scroll" id="leaveTableScroll"></div>
     </div>
+    <div class="leave-calendar-card">
+      <div class="summary-intro">
+        <p>Leave by day for the 2026/27 cycle — each person is a color; hover a day to see who's off.</p>
+      </div>
+      <div id="leaveCalendarWrap"></div>
+    </div>
   `;
   document.getElementById("refreshLeaveBtn").addEventListener("click", renderLeave);
   document.getElementById("syncPayspaceBtn").addEventListener("click", syncPayspaceLeave);
   document.getElementById("leaveTableScroll").appendChild(buildLeaveTable());
+  document.getElementById("leaveCalendarWrap").appendChild(buildLeaveCalendar());
 }
 async function renderLeave(){
   if (!hasPageAccess("leave")) return;
