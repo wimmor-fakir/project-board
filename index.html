@@ -4921,10 +4921,19 @@ const TAB_STORAGE_KEY = "project-board-current-tab-v1";
 function selectProject(id){
   // refreshAll() re-invokes selectProject(currentId) on every board change
   // anywhere in the app (including remote edits from other users), just to
-  // keep the active panel's chrome in sync. Team Update has nothing to do
-  // with board_state, so only reload it on an actual navigation into the
-  // tab — otherwise it wipes whatever the person is mid-typing there.
-  const enteringTeamUpdate = id === "teamupdate" && currentId !== "teamupdate";
+  // keep the active panel's chrome in sync. These pages' data has nothing
+  // to do with board_state, so only reload them on an actual navigation
+  // into the tab — otherwise an unrelated edit elsewhere wipes whatever
+  // the person is mid-typing (a goal, a forecast cell, a leave balance…).
+  // Activity is deliberately excluded: it's a log of board changes, so
+  // reloading it whenever the board changes is the correct behavior.
+  const wasOnTab = currentId;
+  const entering = (tab) => id === tab && wasOnTab !== tab;
+  const enteringTeamUpdate = entering("teamupdate");
+  const enteringSimCards = entering("simcards");
+  const enteringForecasting = entering("forecasting");
+  const enteringGoals = entering("goals");
+  const enteringLeave = entering("leave");
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
@@ -4948,7 +4957,7 @@ function selectProject(id){
   } else if (id === "simcards"){
     mainTitleEl.textContent = "SIM Cards";
     document.getElementById("crumb").textContent = "Overview";
-    renderSimCards();
+    if (enteringSimCards) renderSimCards();
   } else if (id === "teamupdate"){
     mainTitleEl.textContent = "Team Update";
     document.getElementById("crumb").textContent = "Overview";
@@ -4956,15 +4965,15 @@ function selectProject(id){
   } else if (id === "forecasting"){
     mainTitleEl.textContent = "Forecasting";
     document.getElementById("crumb").textContent = "Overview";
-    renderForecasting();
+    if (enteringForecasting) renderForecasting();
   } else if (id === "goals"){
     mainTitleEl.textContent = "Goals";
     document.getElementById("crumb").textContent = "Overview";
-    renderGoals();
+    if (enteringGoals) renderGoals();
   } else if (id === "leave"){
     mainTitleEl.textContent = "Leave 2026 -2027 Financial Year Calculator";
     document.getElementById("crumb").textContent = "Overview";
-    renderLeave();
+    if (enteringLeave) renderLeave();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
