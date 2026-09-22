@@ -191,23 +191,13 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    // Kept separate from lastRechargeByMsisdn (SIMcontrol's own /recharge
-    // record) so the app can show both the raw manual override and the
-    // calculated date as distinct columns.
-    const overrideByMsisdn: Record<string, string> = {};
-    const { data: overrideRows } = await adminClient.from("sim_recharge_overrides").select("msisdn, last_recharge_date");
-    (overrideRows || []).forEach((o: { msisdn: string; last_recharge_date: string }) => {
-      overrideByMsisdn[o.msisdn] = o.last_recharge_date;
-    });
-    // "Calculated" prefers the balance-jump date (see above); if that finds
-    // nothing (e.g. the balance field guess above is wrong, or no jump fell
-    // inside the lookback window) it falls back to the /recharge endpoint's
-    // own record. Either way, the later of that and a manual override wins.
+    // Prefers the balance-jump date (see above); if that finds nothing
+    // (e.g. the balance field guess above is wrong, or no jump fell inside
+    // the lookback window) it falls back to the /recharge endpoint's own
+    // record. There's no manual override anymore — this is the only source
+    // for last-recharge, used as-is for the bundle-expiry runout candidate.
     function effectiveRecharge(msisdn: string, todayBalanceMb: number): string | null {
-      const calculated = balanceJumpRechargeDate(msisdn, todayBalanceMb) || lastRechargeByMsisdn[msisdn] || null;
-      const override = overrideByMsisdn[msisdn] || null;
-      if (calculated && override) return calculated > override ? calculated : override;
-      return calculated || override;
+      return balanceJumpRechargeDate(msisdn, todayBalanceMb) || lastRechargeByMsisdn[msisdn] || null;
     }
 
     const results = [];
@@ -235,8 +225,8 @@ Deno.serve(async (req) => {
         balanceRunoutDate = toDateStr(d);
       }
       // Candidate 2: the data bundle's own 30-day validity window from the
-      // last recharge (the later of a manual override and SIMcontrol's own
-      // record of it) — data is lost at this point even if balance remains.
+      // last recharge (see effectiveRecharge above) — data is lost at this
+      // point even if balance remains.
       const bundleExpiryDate = lastRecharge ? addDays(lastRecharge, 30) : null;
 
       // The SIM runs out of usable data at whichever of the two comes first.
@@ -260,7 +250,6 @@ Deno.serve(async (req) => {
         yesterday_usage_mb: yesterdayUsageMb,
         expected_runout_date: expectedRunoutDate,
         last_recharge_date: lastRecharge,
-        recharge_override_date: overrideByMsisdn[msisdn] || null,
         created: sim.created,
       });
     }
