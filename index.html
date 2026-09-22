@@ -407,6 +407,8 @@
   .main-title-name.status-identity-editable:hover{ opacity:1; background:var(--surface-sunken); }
   .summary-name.status-identity-editable{ padding:2px 6px; margin:-2px -6px; border-radius:6px; }
   .summary-name.status-identity-editable:hover{ opacity:1; background:var(--surface-sunken); }
+  .project-link{ cursor:pointer; }
+  .project-link:hover{ text-decoration:underline; color:var(--accent); }
 
   /* ---------- Action list ---------- */
   .action-panel{ display:flex; flex-direction:column; gap:14px; min-height:0; }
@@ -592,8 +594,9 @@
   .project-tag{
     display:inline-flex; align-items:center; gap:5px; width:fit-content;
     font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
-    color:var(--ink-2);
+    color:var(--ink-2); cursor:pointer;
   }
+  .project-tag:hover{ color:var(--accent); }
   .project-tag .tag-dot{ width:6px; height:6px; border-radius:50%; flex:none; }
   .project-tag .tag-dot.on-track{ background:var(--success); }
   .project-tag .tag-dot.at-risk{ background:var(--warning); }
@@ -797,7 +800,9 @@
   .activity-project{
     font-size:11px; font-weight:600; color:var(--accent);
     background:var(--accent-soft); border-radius:999px; padding:1px 8px;
+    cursor:pointer;
   }
+  .activity-project:hover{ background:var(--accent-soft-border); }
   .activity-when{ font-size:11px; color:var(--ink-3); white-space:nowrap; }
   .activity-summary{
     display:flex; align-items:center; flex-wrap:wrap; gap:8px;
@@ -2473,7 +2478,7 @@ function buildSummaryCard(p, index, filtersActive){
     <div class="summary-main">
       <div class="summary-top">
         <span class="mono" style="color:var(--ink-3); font-size:11.5px;">${p.code || ""}</span>
-        <span class="summary-name status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status">${p.name}</span>
+        <span class="summary-name status-identity-editable" data-goto-project="${p.id}" title="Open ${p.name}">${p.name}</span>
         <span class="pill status-identity-editable" data-edit-identity="${p.id}" title="Click to edit name or status" style="color:${health.color}; background:${health.soft}"><span class="pill-dot" style="background:${health.color}"></span>${health.label}</span>
         ${ownerBadgeHtml(p)}
         <button type="button" class="summary-open-count" title="Open ${p.name}'s action items">${openCount} open action points</button>
@@ -2624,7 +2629,7 @@ panelsEl.appendChild(summaryPanel);
 function buildPersonRow(item, forPerson){
   const display = actionDisplayStatus(item);
   const statusOpt = actionStatusOption(item.status);
-  const tagsHtml = item.projectTags.map(t => `<span class="project-tag"><span class="tag-dot" style="background:${healthOption(t.health).color}"></span>${t.name}</span>`).join("");
+  const tagsHtml = item.projectTags.map(t => `<span class="project-tag" data-goto-project="${t.id}" title="Open ${t.name}"><span class="tag-dot" style="background:${healthOption(t.health).color}"></span>${t.name}</span>`).join("");
   const otherPeople = item.people.filter(n => n !== forPerson);
   return `
     <div class="item" data-item-id="${item._id}" tabindex="0" role="button">
@@ -2687,7 +2692,7 @@ function buildPersonGroupCard(person, filtersActive){
       <div class="person-head-detail" data-edit-person="${person.name}" title="Click to edit this person">
         <div class="person-name">${person.name}</div>
         <div class="person-role">${person.items.length} action${person.items.length === 1 ? "" : "s"} · ${person.projectCount} project${person.projectCount === 1 ? "" : "s"}</div>
-        ${person.ownedProjects.length ? `<div class="person-owned-projects"><span class="owned-label">Owns</span>${person.ownedProjects.map(p => `<span class="project-tag"><span class="tag-dot" style="background:${healthOption(p.health).color}"></span>${p.name}</span>`).join("")}</div>` : ""}
+        ${person.ownedProjects.length ? `<div class="person-owned-projects"><span class="owned-label">Owns</span>${person.ownedProjects.map(p => `<span class="project-tag" data-goto-project="${p.id}" title="Open ${p.name}"><span class="tag-dot" style="background:${healthOption(p.health).color}"></span>${p.name}</span>`).join("")}</div>` : ""}
       </div>
       <div class="person-tally">${person.openCount} open</div>
       <span class="collapse-chevron" aria-hidden="true">${collapsed ? "▸" : "▾"}</span>
@@ -2967,6 +2972,18 @@ function activityEntryProjectNames(entry){
   const fallback = projectNameFromActionCode(entry.action_code);
   return fallback ? [fallback] : [];
 }
+// Same resolution order as activityEntryProjectNames above, but keeps each
+// project's id so its pill in the Activity row can link there.
+function projectTagsFromIds(projectIds){
+  return (projectIds || []).map(id => PROJECTS.find(p => p.id === id)).filter(Boolean).map(p => ({ id: p.id, name: p.name }));
+}
+function activityEntryProjectTags(entry){
+  const item = findItemById(entry.action_id);
+  if (item) return projectTagsFromIds(item.projectIds);
+  if (entry.payload && entry.payload.projectIds) return projectTagsFromIds(entry.payload.projectIds);
+  const project = PROJECTS.find(p => p.code === (entry.action_code || "").split("-")[0]);
+  return project ? [{ id: project.id, name: project.name }] : [];
+}
 const activityEntriesById = new Map();
 function buildActivityRow(entry){
   const row = document.createElement("div");
@@ -2977,8 +2994,9 @@ function buildActivityRow(entry){
         ? `<button type="button" class="activity-code-link mono" data-open-item="${entry.action_id}" title="Open this action item">${entry.action_code}</button> · `
         : `<span class="mono">${entry.action_code}</span> · `)
     : "";
-  const projectNames = activityEntryProjectNames(entry);
-  const projectBit = projectNames.length ? `<span class="activity-project">${projectNames.join(", ")}</span>` : "";
+  const projectBit = activityEntryProjectTags(entry)
+    .map(t => `<span class="activity-project" data-goto-project="${t.id}" title="Open ${t.name}">${t.name}</span>`)
+    .join("");
   const canRestore = entry.change_type === "deleted" && !itemExists && entry.payload;
   row.innerHTML = `
     <div class="activity-meta">
@@ -3933,7 +3951,7 @@ function buildGoalsTable(){
       const text = goalText(p.id, slot);
       return `<td><span class="goals-cell-editable" data-edit-goal="${p.id}" data-goal-slot="${slot}" title="Click to edit this goal">${text || "+ Add goal"}</span></td>`;
     }).join("");
-    return `<tr><td class="goals-project-cell">${p.name}</td>${cells}</tr>`;
+    return `<tr><td class="goals-project-cell"><span class="project-link" data-goto-project="${p.id}" title="Open ${p.name}">${p.name}</span></td>${cells}</tr>`;
   }).join("");
   const wrap = document.createElement("div");
   if (!filteredProjects.length){
@@ -5912,6 +5930,14 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  // Checked first so a project name/tag nested inside some other
+  // clickable row (a person card, an activity entry, a goals cell) always
+  // navigates to that project instead of triggering the row's own handler.
+  const gotoProjectEl = e.target.closest("[data-goto-project]");
+  if (gotoProjectEl){
+    selectProject(gotoProjectEl.dataset.gotoProject);
+    return;
+  }
   if (e.target.closest("#addProjectBtn")){
     openNewProjectModal();
     return;
