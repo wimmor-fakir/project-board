@@ -4919,6 +4919,12 @@ renderProjectPanels();
 const TAB_STORAGE_KEY = "project-board-current-tab-v1";
 
 function selectProject(id){
+  // refreshAll() re-invokes selectProject(currentId) on every board change
+  // anywhere in the app (including remote edits from other users), just to
+  // keep the active panel's chrome in sync. Team Update has nothing to do
+  // with board_state, so only reload it on an actual navigation into the
+  // tab — otherwise it wipes whatever the person is mid-typing there.
+  const enteringTeamUpdate = id === "teamupdate" && currentId !== "teamupdate";
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
@@ -4946,7 +4952,7 @@ function selectProject(id){
   } else if (id === "teamupdate"){
     mainTitleEl.textContent = "Team Update";
     document.getElementById("crumb").textContent = "Overview";
-    renderTeamUpdates();
+    if (enteringTeamUpdate) renderTeamUpdates();
   } else if (id === "forecasting"){
     mainTitleEl.textContent = "Forecasting";
     document.getElementById("crumb").textContent = "Overview";
