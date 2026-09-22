@@ -156,19 +156,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    // The later of a manually-set date (from the SIM Cards page's "click to
-    // edit") and whatever SIMcontrol's own API reports for that SIM is used.
+    // Kept separate from lastRechargeByMsisdn (SIMcontrol's own record) so
+    // the app can show both the raw manual override and the calculated
+    // date (the later of the two) as distinct columns.
+    const overrideByMsisdn: Record<string, string> = {};
     const { data: overrideRows } = await adminClient.from("sim_recharge_overrides").select("msisdn, last_recharge_date");
     (overrideRows || []).forEach((o: { msisdn: string; last_recharge_date: string }) => {
-      if (!lastRechargeByMsisdn[o.msisdn] || o.last_recharge_date > lastRechargeByMsisdn[o.msisdn]) {
-        lastRechargeByMsisdn[o.msisdn] = o.last_recharge_date;
-      }
+      overrideByMsisdn[o.msisdn] = o.last_recharge_date;
     });
+    function effectiveRecharge(msisdn: string): string | null {
+      const fromSimControl = lastRechargeByMsisdn[msisdn] || null;
+      const override = overrideByMsisdn[msisdn] || null;
+      if (fromSimControl && override) return fromSimControl > override ? fromSimControl : override;
+      return fromSimControl || override;
+    }
 
     const results = [];
     for (const sim of sims) {
       const msisdn = sim.msisdn;
-      const lastRecharge = lastRechargeByMsisdn[msisdn] || null;
+      const lastRecharge = effectiveRecharge(msisdn);
       const simCreatedDate = toDateStr(new Date(sim.created));
 
       // Only count days the SIM actually existed for.
@@ -215,6 +221,7 @@ Deno.serve(async (req) => {
         yesterday_usage_mb: yesterdayUsageMb,
         expected_runout_date: expectedRunoutDate,
         last_recharge_date: lastRecharge,
+        recharge_override_date: overrideByMsisdn[msisdn] || null,
         created: sim.created,
       });
     }
