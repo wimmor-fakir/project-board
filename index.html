@@ -1114,14 +1114,37 @@
     font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
     color:var(--ink-3); margin-bottom:8px;
   }
-  .simcard-balance-history-list{
-    max-height:240px; overflow:auto; display:flex; flex-direction:column;
-    font-size:12px; background:var(--surface); border:1px solid var(--border);
-    border-radius:8px; scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent;
+  .simcard-balance-history-empty{ color:var(--ink-3); font-style:italic; font-size:12px; }
+  .simcard-balance-chart{
+    position:relative; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:14px 16px 8px 64px;
   }
-  .simcard-balance-history-row{ display:flex; justify-content:space-between; gap:16px; padding:4px 12px; }
-  .simcard-balance-history-row:nth-child(even){ background:var(--surface-sunken); }
-  .simcard-balance-history-empty{ color:var(--ink-3); font-style:italic; }
+  .simcard-balance-chart-plot{ position:relative; height:160px; }
+  .simcard-balance-chart-gridline{ position:absolute; left:0; right:0; height:0; border-top:1px solid var(--chart-grid); }
+  .simcard-balance-chart-gridline span{
+    position:absolute; right:100%; top:0; margin-right:8px; transform:translateY(-50%);
+    font-size:10px; color:var(--ink-3); white-space:nowrap;
+  }
+  .simcard-balance-chart-bars{ position:absolute; inset:0; display:flex; }
+  .simcard-balance-chart-slot{
+    flex:1 1 0; min-width:0; display:flex; align-items:flex-end; justify-content:center;
+    padding:0 1px; outline:none; border-radius:4px 4px 0 0;
+  }
+  .simcard-balance-chart-slot:hover, .simcard-balance-chart-slot:focus-visible{ background:var(--accent-soft); }
+  .simcard-balance-chart-bar{ width:100%; max-width:28px; background:var(--chart-1); border-radius:4px 4px 0 0; }
+  .simcard-balance-chart-slot.is-zero .simcard-balance-chart-bar{ min-height:2px; border-radius:0; }
+  .simcard-balance-chart-xlabels{ display:flex; margin-top:6px; height:14px; }
+  .simcard-balance-chart-xlabels span{
+    flex:1 1 0; min-width:0; display:flex; justify-content:center;
+    font-size:10px; color:var(--ink-3); white-space:nowrap;
+  }
+  .simcard-balance-chart-tooltip{
+    position:absolute; z-index:5; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; box-shadow:var(--shadow); padding:6px 10px; pointer-events:none;
+    font-size:12px; white-space:nowrap;
+  }
+  .simcard-balance-chart-tooltip-date{ color:var(--ink-2); }
+  .simcard-balance-chart-tooltip-value{ font-weight:700; color:var(--ink); font-family:"IBM Plex Mono",monospace; }
   .simcard-flag-badge{
     display:inline-flex; align-items:center; margin-left:8px; padding:2px 7px;
     border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase;
@@ -3234,18 +3257,82 @@ function buildSimCardBalanceHistoryRow(sim){
   const title = history.length
     ? `Daily balance — last ${history.length} day${history.length === 1 ? "" : "s"} on record`
     : "Daily balance";
-  const listHtml = history.length
-    ? history.map(h => `<div class="simcard-balance-history-row"><span>${formatDateWithYear(h.date)}</span><span class="mono">${formatDataMb(h.balance_mb)}</span></div>`).join("")
-    : `<div class="simcard-balance-history-row simcard-balance-history-empty">No recorded history yet — this builds up one day at a time.</div>`;
   row.innerHTML = `
     <td colspan="${SIMCARD_COLUMNS.length}">
       <div class="simcard-balance-history">
         <div class="simcard-balance-history-title">${title}</div>
-        <div class="simcard-balance-history-list">${listHtml}</div>
+        ${history.length ? buildSimBalanceChartHtml(history) : `<div class="simcard-balance-history-empty">No recorded history yet — this builds up one day at a time.</div>`}
       </div>
     </td>
   `;
+  const chart = row.querySelector(".simcard-balance-chart");
+  if (chart) wireSimBalanceChartTooltip(chart);
   return row;
+}
+function buildSimBalanceChartHtml(history){
+  const byDate = new Map(history.map(h => [h.date, Number(h.balance_mb)]));
+  const sortedDates = [...byDate.keys()].sort();
+  // One slot per calendar day, so a day with no reading shows as a gap
+  // rather than being silently squeezed out of the x axis.
+  const days = [];
+  for (let d = sortedDates[0]; d <= sortedDates[sortedDates.length - 1]; d = addDaysToDateStr(d, 1)) days.push(d);
+
+  const maxBalance = Math.max(0, ...byDate.values());
+  const unit = maxBalance >= 1024 ? 1024 : 1;
+  const unitLabel = unit === 1024 ? "GB" : "MB";
+  const rawStep = (maxBalance / unit) / 4 || 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const niceStep = Math.ceil(rawStep / magnitude) * magnitude;
+  const axisMaxMb = niceStep * 4 * unit;
+
+  let gridlines = "";
+  for (let i = 0; i <= 4; i++){
+    gridlines += `<div class="simcard-balance-chart-gridline" style="bottom:${i * 25}%"><span>${+(i * niceStep).toFixed(2)} ${unitLabel}</span></div>`;
+  }
+  const shortDate = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const slots = days.map(d => {
+    const has = byDate.has(d);
+    const value = byDate.get(d);
+    const pct = has && value > 0 ? Math.max((value / axisMaxMb) * 100, 1) : 0;
+    const valueText = has ? formatDataMb(value) : "No reading";
+    const stateClass = !has ? " is-missing" : value > 0 ? "" : " is-zero";
+    return `<div class="simcard-balance-chart-slot${stateClass}" tabindex="0" data-date="${formatDateWithYear(d)}" data-value="${valueText}" aria-label="${formatDateWithYear(d)}: ${valueText}"><div class="simcard-balance-chart-bar" style="height:${pct}%"></div></div>`;
+  }).join("");
+  const labelStride = Math.max(1, Math.ceil(days.length / 10));
+  const xLabels = days.map((d, i) => `<span>${i % labelStride === 0 ? shortDate(d) : ""}</span>`).join("");
+
+  return `
+    <div class="simcard-balance-chart">
+      <div class="simcard-balance-chart-plot">
+        ${gridlines}
+        <div class="simcard-balance-chart-bars">${slots}</div>
+      </div>
+      <div class="simcard-balance-chart-xlabels">${xLabels}</div>
+      <div class="simcard-balance-chart-tooltip" hidden></div>
+    </div>
+  `;
+}
+function wireSimBalanceChartTooltip(chart){
+  const tooltip = chart.querySelector(".simcard-balance-chart-tooltip");
+  const show = (slot) => {
+    tooltip.innerHTML = `<div class="simcard-balance-chart-tooltip-date"></div><div class="simcard-balance-chart-tooltip-value"></div>`;
+    tooltip.firstElementChild.textContent = slot.dataset.date;
+    tooltip.lastElementChild.textContent = slot.dataset.value;
+    tooltip.hidden = false;
+    const chartRect = chart.getBoundingClientRect();
+    const slotRect = slot.getBoundingClientRect();
+    const barRect = slot.firstElementChild.getBoundingClientRect();
+    const left = slotRect.left + slotRect.width / 2 - chartRect.left - tooltip.offsetWidth / 2;
+    tooltip.style.left = Math.max(0, Math.min(left, chartRect.width - tooltip.offsetWidth)) + "px";
+    tooltip.style.top = (barRect.top - chartRect.top - tooltip.offsetHeight - 6) + "px";
+  };
+  const hide = () => { tooltip.hidden = true; };
+  chart.querySelectorAll(".simcard-balance-chart-slot").forEach(slot => {
+    slot.addEventListener("mouseenter", () => show(slot));
+    slot.addEventListener("focus", () => show(slot));
+    slot.addEventListener("mouseleave", hide);
+    slot.addEventListener("blur", hide);
+  });
 }
 function toggleSimBalanceHistory(msisdn){
   if (expandedSimBalanceHistory.has(msisdn)) expandedSimBalanceHistory.delete(msisdn);
