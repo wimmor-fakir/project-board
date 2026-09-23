@@ -3539,6 +3539,12 @@ function buildTeamUpdateRow(entry){
   });
   return row;
 }
+// Read fresh on every call, not TODAY_STR (fixed at page load) — a tab left
+// open overnight must still file the update under the day it's posted.
+function currentLocalDateStr(){
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 async function postTeamUpdate(){
   const errorEl = document.getElementById("teamUpdateError");
   const postBtn = document.getElementById("teamUpdatePostBtn");
@@ -3560,7 +3566,7 @@ async function postTeamUpdate(){
     const { error } = await supabaseClient.from("team_updates").upsert({
       ...answers,
       created_by: authSession.user.email,
-      update_date: TODAY_STR,
+      update_date: currentLocalDateStr(),
       created_at: new Date().toISOString(),
     }, { onConflict: "created_by,update_date" });
     if (error) throw error;
@@ -3591,7 +3597,8 @@ async function renderTeamUpdates(){
     return;
   }
   const myEmail = authSession.user.email;
-  const myTodayEntry = data.find(entry => entry.created_by === myEmail && (entry.update_date || entry.created_at.slice(0, 10)) === TODAY_STR) || null;
+  const todayStr = currentLocalDateStr();
+  const myTodayEntry = data.find(entry => entry.created_by === myEmail && (entry.update_date || entry.created_at.slice(0, 10)) === todayStr) || null;
 
   teamUpdatePanel.innerHTML = `
     <div class="summary-intro">
