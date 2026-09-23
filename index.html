@@ -4713,6 +4713,13 @@ function renderSettings(){
     </div>
     ` : ""}
     <div class="settings-section">
+      <div class="settings-section-title">Leave page</div>
+      <p class="field-hint">Tick whose leave is shown on the Leave page (its table and calendar). Unticking someone only hides them there — their leave figures are kept and come back when ticked again.</p>
+      <div class="user-mgmt-access" id="leaveVisibilityList" style="margin-top:10px;">
+        <p class="summary-facts">Loading…</p>
+      </div>
+    </div>
+    <div class="settings-section">
       <div class="settings-section-title">Project statuses</div>
       <div class="settings-status-list">${healthRows}</div>
       <button type="button" class="filter-clear" id="settingsHealthAddToggle">+ Add new status</button>
@@ -4756,13 +4763,6 @@ function renderSettings(){
         </div>
         <div class="modal-error" id="settingsActionAddError" hidden></div>
         <button type="button" class="btn btn-secondary" id="settingsActionAddConfirm">Add status</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Leave page</div>
-      <p class="field-hint">Tick whose leave is shown on the Leave page (its table and calendar). Unticking someone only hides them there — their leave figures are kept and come back when ticked again.</p>
-      <div class="user-mgmt-access" id="leaveVisibilityList" style="margin-top:10px;">
-        <p class="summary-facts">Loading…</p>
       </div>
     </div>
   `;
