@@ -73,6 +73,15 @@ function num(v: unknown) {
   const n = parseFloat(String(v));
   return isNaN(n) ? 0 : n;
 }
+// SIMcontrol's /sims list returns msisdn in E.164 format (a leading "+"),
+// but a hand-written backfill (or a future one) easily omits it — and a
+// mismatch there means sim_daily_balances rows silently never match up
+// with the live SIM, so no history shows for that SIM. Stripped to bare
+// digits everywhere this table is read or written, so either format works
+// as input and stays consistent in storage.
+function normalizeMsisdn(m: string | null | undefined): string {
+  return (m || "").replace(/^\+/, "");
+}
 
 // The exact shape of a SIM's tags is unconfirmed (could be an array of
 // plain strings, or an array of {name}/{tag}/{label} objects) — handle
@@ -167,7 +176,7 @@ Deno.serve(async (req) => {
     // response.
     if (sims.length) {
       await adminClient.from("sim_daily_balances").upsert(
-        sims.map((sim) => ({ msisdn: sim.msisdn, date: today, balance_mb: num(sim.data_balance_in_mb), recorded_by: "sim-cards function" })),
+        sims.map((sim) => ({ msisdn: normalizeMsisdn(sim.msisdn), date: today, balance_mb: num(sim.data_balance_in_mb), recorded_by: "sim-cards function" })),
         { onConflict: "msisdn,date" }
       );
     }
@@ -190,15 +199,16 @@ Deno.serve(async (req) => {
       .order("date", { ascending: false });
     const balanceHistoryByMsisdn: Record<string, { date: string; balance_mb: number }[]> = {};
     (historyRows || []).forEach((row: { msisdn: string; date: string; balance_mb: number }) => {
-      if (!balanceHistoryByMsisdn[row.msisdn]) balanceHistoryByMsisdn[row.msisdn] = [];
-      balanceHistoryByMsisdn[row.msisdn].push({ date: row.date, balance_mb: Number(row.balance_mb) });
+      const key = normalizeMsisdn(row.msisdn);
+      if (!balanceHistoryByMsisdn[key]) balanceHistoryByMsisdn[key] = [];
+      balanceHistoryByMsisdn[key].push({ date: row.date, balance_mb: Number(row.balance_mb) });
     });
     // A recharge shows up as the balance being higher than the reading
     // before it (balance otherwise only ever goes down, from usage). Walks
     // the stored history newest-first and returns the date of the first
     // (most recent) such jump.
     function balanceJumpRechargeDate(msisdn: string): string | null {
-      const series = balanceHistoryByMsisdn[msisdn] || [];
+      const series = balanceHistoryByMsisdn[normalizeMsisdn(msisdn)] || [];
       for (let i = 0; i < series.length - 1; i++) {
         if (series[i].balance_mb > series[i + 1].balance_mb) return series[i].date;
       }
@@ -262,7 +272,7 @@ Deno.serve(async (req) => {
         last_recharge_date: lastRecharge,
         // Newest first, capped at HISTORY_LOOKBACK_DAYS — the SIM Cards
         // page shows this when a row is expanded.
-        balance_history: balanceHistoryByMsisdn[msisdn] || [],
+        balance_history: balanceHistoryByMsisdn[normalizeMsisdn(msisdn)] || [],
         created: sim.created,
       });
     }
