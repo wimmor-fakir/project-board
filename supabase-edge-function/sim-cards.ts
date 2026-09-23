@@ -129,47 +129,53 @@ Deno.serve(async (req) => {
 
     const sims = await fetchAllPages("/sims", apiKey);
 
-    // Yesterday back through 35 days ago — one usage call per day, each
-    // covering every SIM at once. historyDays[0] is yesterday. 35 days
-    // (not just 7) so recharge detection below has enough runway: bundles
-    // are valid ~30 days, so a recharge should fall somewhere in this
-    // window even if it happened a few weeks ago. The 7-day average-usage
-    // figure reuses the first slice of this same fetch rather than calling
-    // the API again.
-    const RECHARGE_LOOKBACK_DAYS = 35;
-    const historyDays: string[] = [];
-    for (let i = 1; i <= RECHARGE_LOOKBACK_DAYS; i++) historyDays.push(toDateStr(new Date(Date.now() - i * 86400000)));
+    // Yesterday back through 7 days ago — one usage call per day, each
+    // covering every SIM at once. recentDays[0] is yesterday, which
+    // doubles as the "yesterday's usage" figure.
+    const recentDays: string[] = [];
+    for (let i = 1; i <= 7; i++) recentDays.push(toDateStr(new Date(Date.now() - i * 86400000)));
     const usageByDate: Record<string, Record<string, any>> = {};
-    for (const day of historyDays) {
+    for (const day of recentDays) {
       usageByDate[day] = ((await simControlGet(`/usage?start_date=${day}&end_date=${day}`, apiKey)).data) || {};
     }
-    const yesterday = historyDays[0];
-    const recentDays = historyDays.slice(0, 7);
+    const yesterday = recentDays[0];
 
-    // UNVERIFIED: the field name SIMcontrol uses for a day's balance on the
-    // /usage record hasn't been confirmed against a real response (the API
-    // docs only describe `data` as an untyped object) — check a few likely
-    // spellings. If none of them are present, balanceJumpRechargeDate below
-    // simply finds nothing for that SIM — this is now the only source for
-    // last-recharge, so a wrong guess here means no date at all, not a
-    // fallback. Verify/adjust this once deployed against real data.
-    function extractBalanceMb(entry: any): number | null {
-      const raw = entry?.data_balance_in_mb ?? entry?.balance_mb ?? entry?.balance
-        ?? entry?.closing_balance_mb ?? entry?.closing_balance ?? entry?.remaining_balance_mb;
-      if (raw === undefined || raw === null) return null;
-      const n = parseFloat(String(raw));
-      return isNaN(n) ? null : n;
+    // Record today's live balance for every SIM (data_balance_in_mb, from
+    // the /sims list above — the one figure SIMcontrol reliably reports)
+    // into sim_daily_balances, so a real day-over-day history builds up.
+    // This replaces an earlier attempt that guessed at an unconfirmed
+    // balance field on the /usage endpoint — that field was never
+    // confirmed to exist and recharges went undetected as a result.
+    // Requires supabase-sim-daily-balances.sql to have been run once.
+    // Best-effort: a write failure here shouldn't block the rest of the
+    // response.
+    if (sims.length) {
+      await adminClient.from("sim_daily_balances").upsert(
+        sims.map((sim) => ({ msisdn: sim.msisdn, date: today, balance_mb: num(sim.data_balance_in_mb), recorded_by: "sim-cards function" })),
+        { onConflict: "msisdn,date" }
+      );
     }
+
+    // History is only expected from this date onward — days before it were
+    // never recorded (the table didn't exist yet) unless backfilled by hand.
+    const HISTORY_START_DATE = "2026-09-01";
+    const { data: historyRows } = await adminClient
+      .from("sim_daily_balances")
+      .select("msisdn, date, balance_mb")
+      .gte("date", HISTORY_START_DATE)
+      .lte("date", today)
+      .order("date", { ascending: false });
+    const balanceHistoryByMsisdn: Record<string, { date: string; balance: number }[]> = {};
+    (historyRows || []).forEach((row: { msisdn: string; date: string; balance_mb: number }) => {
+      if (!balanceHistoryByMsisdn[row.msisdn]) balanceHistoryByMsisdn[row.msisdn] = [];
+      balanceHistoryByMsisdn[row.msisdn].push({ date: row.date, balance: Number(row.balance_mb) });
+    });
     // A recharge shows up as the balance being higher than the reading
     // before it (balance otherwise only ever goes down, from usage). Walks
-    // today's live balance back through the lookback window, newest first,
-    // and returns the date of the first (most recent) such jump.
-    function balanceJumpRechargeDate(msisdn: string, todayBalanceMb: number): string | null {
-      const series: { date: string; balance: number }[] = [{ date: today, balance: todayBalanceMb }];
-      for (const day of historyDays) {
-        const bal = extractBalanceMb(usageByDate[day][msisdn]);
-        if (bal !== null) series.push({ date: day, balance: bal });
-      }
+    // the stored history newest-first and returns the date of the first
+    // (most recent) such jump.
+    function balanceJumpRechargeDate(msisdn: string): string | null {
+      const series = balanceHistoryByMsisdn[msisdn] || [];
       for (let i = 0; i < series.length - 1; i++) {
         if (series[i].balance > series[i + 1].balance) return series[i].date;
       }
@@ -184,7 +190,7 @@ Deno.serve(async (req) => {
       // The only source for last-recharge now (no /recharge-endpoint
       // fallback, no manual override) — used as-is for the bundle-expiry
       // runout candidate below.
-      const lastRecharge = balanceJumpRechargeDate(msisdn, balanceMb);
+      const lastRecharge = balanceJumpRechargeDate(msisdn);
 
       // Only count days the SIM actually existed for.
       const last7DaysUsage = recentDays
