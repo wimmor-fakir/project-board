@@ -14,12 +14,16 @@
 -- PaySpace EmployeeNumber, used both for that EOP calculation and to
 -- show the read-only PaySpace Applications figure (see the payspace Edge
 -- Function).
+--
+-- show_on_leave is ticked/unticked under Settings -> Leave page, and
+-- controls whether that person appears on the Leave page at all.
 
 create table if not exists leave_balances (
   person_name text primary key,
   bop numeric not null default 0,
   payspace_entitlement numeric not null default 25,
   payspace_employee_number text,
+  show_on_leave boolean not null default true,
   updated_by text,
   updated_at timestamptz not null default now()
 );

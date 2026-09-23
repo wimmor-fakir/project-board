@@ -4367,7 +4367,7 @@ function addDaysToDateStr(dateStr, days){
 }
 function buildLeaveCalendar(){
   const wrap = document.createElement("div");
-  const peopleWithLeave = PEOPLE_ORDER
+  const peopleWithLeave = leavePagePeople()
     .map(name => ({ name, details: (payspaceDataFor(name) || {}).application_details || [] }))
     .filter(p => p.details.length > 0);
   if (!peopleWithLeave.length){
@@ -4422,7 +4422,8 @@ function buildLeaveCalendar(){
   return wrap.firstElementChild;
 }
 function buildLeaveTable(){
-  const rows = PEOPLE_ORDER.map(name => {
+  const people = leavePagePeople();
+  const rows = people.map(name => {
     const psNumber = leavePayspaceNumber(name);
     const psData = payspaceDataFor(name);
     const eop = leaveEopFor(name);
@@ -4439,6 +4440,10 @@ function buildLeaveTable(){
   const wrap = document.createElement("div");
   if (!PEOPLE_ORDER.length){
     wrap.innerHTML = `<p class="summary-facts">No people yet — add someone via an action item or the Owner picker first.</p>`;
+    return wrap.firstElementChild;
+  }
+  if (!people.length){
+    wrap.innerHTML = `<p class="summary-facts">Everyone is hidden from the Leave page — tick people under Settings → Leave page to show them here.</p>`;
     return wrap.firstElementChild;
   }
   wrap.innerHTML = `
@@ -4459,7 +4464,32 @@ function buildLeaveTable(){
   return wrap.firstElementChild;
 }
 function newLeaveBalanceRow(){
-  return { bop: 0, payspace_entitlement: LEAVE_ENTITLEMENT_DEFAULT, payspace_employee_number: "" };
+  return { bop: 0, payspace_entitlement: LEAVE_ENTITLEMENT_DEFAULT, payspace_employee_number: "", show_on_leave: true };
+}
+function leaveBalanceFromRow(row){
+  return {
+    bop: Number(row.bop),
+    payspace_entitlement: row.payspace_entitlement != null ? Number(row.payspace_entitlement) : LEAVE_ENTITLEMENT_DEFAULT,
+    payspace_employee_number: row.payspace_employee_number || "",
+    show_on_leave: row.show_on_leave !== false,
+  };
+}
+function isShownOnLeavePage(name){
+  return !leaveBalances[name] || leaveBalances[name].show_on_leave !== false;
+}
+function leavePagePeople(){
+  return PEOPLE_ORDER.filter(isShownOnLeavePage);
+}
+async function saveLeaveShowOnLeave(name, show){
+  if (!leaveBalances[name]) leaveBalances[name] = newLeaveBalanceRow();
+  leaveBalances[name].show_on_leave = show;
+  const { error } = await supabaseClient.from("leave_balances").upsert({
+    person_name: name,
+    show_on_leave: show,
+    updated_by: authSession.user.email,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "person_name" });
+  if (error) throw error;
 }
 async function saveLeaveBop(name, value){
   if (!leaveBalances[name]) leaveBalances[name] = newLeaveBalanceRow();
@@ -4646,13 +4676,7 @@ async function renderLeave(){
     return;
   }
   leaveBalances = {};
-  (data || []).forEach(row => {
-    leaveBalances[row.person_name] = {
-      bop: Number(row.bop),
-      payspace_entitlement: row.payspace_entitlement != null ? Number(row.payspace_entitlement) : LEAVE_ENTITLEMENT_DEFAULT,
-      payspace_employee_number: row.payspace_employee_number || "",
-    };
-  });
+  (data || []).forEach(row => { leaveBalances[row.person_name] = leaveBalanceFromRow(row); });
   renderLeaveContent();
 }
 
@@ -4734,6 +4758,13 @@ function renderSettings(){
         <button type="button" class="btn btn-secondary" id="settingsActionAddConfirm">Add status</button>
       </div>
     </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Leave page</div>
+      <p class="field-hint">Tick whose leave is shown on the Leave page (its table and calendar). Unticking someone only hides them there — their leave figures are kept and come back when ticked again.</p>
+      <div class="user-mgmt-access" id="leaveVisibilityList" style="margin-top:10px;">
+        <p class="summary-facts">Loading…</p>
+      </div>
+    </div>
   `;
 
   document.getElementById("settingsHealthColorPresets").innerHTML = COLOR_PRESETS.map(hex => `
@@ -4749,6 +4780,52 @@ function renderSettings(){
   if (actionRenameInput){ actionRenameInput.focus(); actionRenameInput.select(); }
 
   if (isAdmin()) loadAndRenderUserList();
+  loadAndRenderLeaveVisibility();
+}
+
+async function loadAndRenderLeaveVisibility(){
+  const container = document.getElementById("leaveVisibilityList");
+  if (!container || !supabaseClient || !authSession) return;
+  if (!PEOPLE_ORDER.length){
+    container.innerHTML = `<p class="summary-facts">No people yet — add someone via an action item or the Owner picker first.</p>`;
+    return;
+  }
+  const { data, error } = await supabaseClient.from("leave_balances").select("*");
+  if (document.getElementById("leaveVisibilityList") !== container) return; // re-rendered or navigated away while loading
+  if (error){
+    container.innerHTML = `<p class="summary-facts">Couldn't load leave settings — has supabase-leave.sql been run yet?</p>`;
+    return;
+  }
+  leaveBalances = {};
+  (data || []).forEach(row => { leaveBalances[row.person_name] = leaveBalanceFromRow(row); });
+  container.innerHTML = "";
+  PEOPLE_ORDER.forEach(name => {
+    const label = document.createElement("label");
+    label.className = "user-mgmt-access-item";
+    label.title = `Show ${name}'s leave on the Leave page`;
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.leaveShowPerson = name;
+    checkbox.checked = isShownOnLeavePage(name);
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(name));
+    container.appendChild(label);
+  });
+}
+
+async function setLeaveShowOnLeave(checkbox){
+  const name = checkbox.dataset.leaveShowPerson;
+  const show = checkbox.checked;
+  checkbox.disabled = true;
+  try {
+    await saveLeaveShowOnLeave(name, show);
+  } catch (e) {
+    checkbox.checked = !show;
+    leaveBalances[name].show_on_leave = !show;
+    alert("Couldn't save — has supabase-migration-leave-show-on-leave.sql been run yet? (" + e.message + ")");
+  } finally {
+    checkbox.disabled = false;
+  }
 }
 
 function buildUserRow(u){
@@ -4838,6 +4915,8 @@ async function setUserPageAccess(checkbox){
 document.addEventListener("change", (e) => {
   const checkbox = e.target.closest("[data-user-page-access]");
   if (checkbox) setUserPageAccess(checkbox);
+  const leaveShowToggle = e.target.closest("[data-leave-show-person]");
+  if (leaveShowToggle) setLeaveShowOnLeave(leaveShowToggle);
   const chartToggle = e.target.closest("[data-toggle-forecast-line-chart]");
   if (chartToggle) toggleForecastLineChart(chartToggle.dataset.toggleForecastLineChart, chartToggle.checked);
 });

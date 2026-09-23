@@ -77,6 +77,10 @@ when you open the live site** — all one-time, no-code steps:
      Run `supabase-migration-leave-payspace-entitlement.sql` once — it
      adds the `payspace_entitlement` column, defaulting every existing
      row to 25 so nothing changes for anyone until you edit it.
+   - **Already ran an earlier version without the Settings page's
+     "Leave page" checkboxes** (which choose whose leave shows on the
+     Leave page)? Run `supabase-migration-leave-show-on-leave.sql` once —
+     it adds the `show_on_leave` column, defaulting everyone to shown.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -493,6 +497,7 @@ typed.
 | Already had an earlier version without the PaySpace # column? Run `supabase-migration-leave-payspace-number.sql` once | Adds that column |
 | Already had an earlier version with entitlement/applications/adjustments instead of BOP? Run `supabase-migration-leave-bop.sql` once | Adds the `bop` column — old data is kept, just no longer read/written |
 | Already had BOP but a flat 25 instead of editable PaySpace Entitlement? Run `supabase-migration-leave-payspace-entitlement.sql` once | Adds the `payspace_entitlement` column, defaulting every row to 25 |
+| Already had the Leave page but no Settings → Leave page checkboxes? Run `supabase-migration-leave-show-on-leave.sql` once | Adds the `show_on_leave` column, defaulting everyone to shown |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
