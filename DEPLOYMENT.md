@@ -382,22 +382,38 @@ where the browser never sees it.
 4. Open `supabase-edge-function/sim-cards.ts` from this project folder,
    select all, copy it, and paste it into the function's code editor,
    replacing whatever template code is there. Click **Deploy**.
-5. Open the `sim-cards` function's **Secrets** settings and add one:
-   `SIMCONTROL_API_KEY` = your SIMcontrol API key (find it in SIMcontrol
-   under your account/API settings — it's the `X-API-Key` value, a
-   string starting with `sc_`). If your Supabase plan doesn't expose a
-   per-function secrets UI, set it project-wide instead: **Edge
-   Functions → Manage secrets**, or via the
-   [Supabase CLI](https://supabase.com/docs/guides/cli):
-   `supabase secrets set SIMCONTROL_API_KEY=sc_...`
+5. Open the `sim-cards` function's **Secrets** settings and add two:
+   - `SIMCONTROL_API_KEY` = your SIMcontrol API key (find it in
+     SIMcontrol under your account/API settings — it's the `X-API-Key`
+     value, a string starting with `sc_`).
+   - `CRON_SECRET` = any random string you make up (a password
+     generator's output is fine) — this is what lets the daily scheduled
+     run in step 7 below prove it's allowed to call this function without
+     a signed-in user. Keep the value handy, you'll need it again in a
+     moment.
+
+   If your Supabase plan doesn't expose a per-function secrets UI, set
+   these project-wide instead: **Edge Functions → Manage secrets**, or
+   via the [Supabase CLI](https://supabase.com/docs/guides/cli):
+   `supabase secrets set SIMCONTROL_API_KEY=sc_... CRON_SECRET=...`
 6. Test it: sign in to your live site as `wim@hawktivity.com` — you
    should see a **SIM Cards** tab in the rail with a table of SIMs
    instead of an error.
+7. **Make the daily balance recording happen even when nobody opens the
+   page:** open `supabase-sim-cards-daily-cron.sql` from this project
+   folder, replace its two placeholders (the `CRON_SECRET` value from
+   step 5, and your project ref from Project Settings → API → Project
+   URL) with the real values, then run it in Supabase's SQL Editor. This
+   schedules a call to the function once a day (02:00 UTC by default —
+   edit the two numbers in the file to change that) so recharge detection
+   keeps working even through a quiet week. See the comments in that file
+   for how to check it's actually firing, or stop it.
 
-**Never paste the SIMcontrol API key into `index.html`, a commit, or
-anywhere else that ends up in the GitHub repo** — it belongs only in
-the Edge Function's secret settings, since that repo (and the live
-site's page source) is public.
+**Never paste the SIMcontrol API key, or the filled-in
+`supabase-sim-cards-daily-cron.sql` with your real `CRON_SECRET` in it,
+into `index.html`, a commit, or anywhere else that ends up in the GitHub
+repo** — both belong only in Supabase's own dashboard / SQL Editor, since
+that repo (and the live site's page source) is public.
 
 **If the admin account ever needs to change:** edit the `ADMIN_EMAIL`
 line near the top of `supabase-edge-function/sim-cards.ts`, then repeat
@@ -480,7 +496,8 @@ typed.
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
-| Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
+| Deploy `sim-cards` and set `SIMCONTROL_API_KEY` + `CRON_SECRET` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
+| Run `supabase-sim-cards-daily-cron.sql` too (with its placeholders filled in) | Schedules a daily call to `sim-cards` so balance history keeps recording even on days nobody opens the page |
 | Deploy `payspace` and set `PAYSPACE_CLIENT_ID` / `PAYSPACE_CLIENT_SECRET` (Part 7, optional) | Powers the Leave page's "Sync from PaySpace" read-only comparison columns — everything else on that page works without this one |
 
 ## Making future changes
