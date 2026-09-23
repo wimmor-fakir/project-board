@@ -1098,8 +1098,30 @@
   .simcards-table tbody tr:last-child{ border-bottom:none; }
   .simcards-table tbody tr:hover{ background:var(--surface-sunken); }
   .simcards-table td:first-child{ white-space:normal; max-width:220px; }
+  .simcard-name-row{ display:flex; align-items:flex-start; gap:6px; }
+  .simcard-expand-toggle{
+    appearance:none; border:none; background:transparent; cursor:pointer;
+    color:var(--ink-3); font-size:11px; padding:2px 3px; line-height:1;
+    flex:none; margin-top:3px; border-radius:4px;
+  }
+  .simcard-expand-toggle:hover{ color:var(--accent); background:var(--accent-soft); }
   .simcard-name{ font-weight:700; font-size:13px; }
   .simcard-msisdn{ font-size:11.5px; color:var(--ink-3); }
+  .simcard-history-row td{ padding:0; }
+  .simcard-history-row:hover{ background:transparent; }
+  .simcard-balance-history{ padding:12px 16px 16px; background:var(--surface-sunken); }
+  .simcard-balance-history-title{
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--ink-3); margin-bottom:8px;
+  }
+  .simcard-balance-history-list{
+    max-height:240px; overflow:auto; display:flex; flex-direction:column;
+    font-size:12px; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent;
+  }
+  .simcard-balance-history-row{ display:flex; justify-content:space-between; gap:16px; padding:4px 12px; }
+  .simcard-balance-history-row:nth-child(even){ background:var(--surface-sunken); }
+  .simcard-balance-history-empty{ color:var(--ink-3); font-style:italic; }
   .simcard-flag-badge{
     display:inline-flex; align-items:center; margin-left:8px; padding:2px 7px;
     border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase;
@@ -3174,6 +3196,7 @@ function simTagClass(tag){
   if (t.includes("hawktivity")) return " simcard-tag-blue";
   return "";
 }
+const expandedSimBalanceHistory = new Set();
 function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
   const row = document.createElement("tr");
   const suspended = !!sim.suspended_at;
@@ -3181,10 +3204,16 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
   const pillLabel = suspended ? "Suspended" : (sim.network_status || "Unknown");
   const isMostUsed = maxYesterdayUsage > 0 && (sim.yesterday_usage_mb || 0) === maxYesterdayUsage;
   const isSoonestRunout = !!earliestRunoutDate && sim.expected_runout_date === earliestRunoutDate;
+  const expanded = expandedSimBalanceHistory.has(sim.msisdn);
   row.innerHTML = `
     <td>
-      <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
-      <div class="simcard-msisdn mono">${sim.msisdn || ""}</div>
+      <div class="simcard-name-row">
+        <button type="button" class="simcard-expand-toggle" data-toggle-sim-history="${sim.msisdn}" title="${expanded ? "Hide" : "Show"} daily balance history" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button>
+        <div>
+          <div class="simcard-name">${sim.description || sim.msisdn || "Unnamed SIM"}</div>
+          <div class="simcard-msisdn mono">${sim.msisdn || ""}</div>
+        </div>
+      </div>
     </td>
     <td>${(sim.tags && sim.tags.length) ? `<div class="simcard-tags">${sim.tags.map(t => `<span class="simcard-tag-chip${simTagClass(t)}">${t}</span>`).join("")}</div>` : "—"}</td>
     <td><span class="pill ${pillClass}"><span class="pill-dot"></span>${pillLabel}</span></td>
@@ -3197,6 +3226,31 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
     <td class="mono" title="A day where the stored daily balance is higher than the day before is treated as a recharge. Used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
   `;
   return row;
+}
+function buildSimCardBalanceHistoryRow(sim){
+  const row = document.createElement("tr");
+  row.className = "simcard-history-row";
+  const history = sim.balance_history || [];
+  const title = history.length
+    ? `Daily balance — last ${history.length} day${history.length === 1 ? "" : "s"} on record`
+    : "Daily balance";
+  const listHtml = history.length
+    ? history.map(h => `<div class="simcard-balance-history-row"><span>${formatDateWithYear(h.date)}</span><span class="mono">${formatDataMb(h.balance_mb)}</span></div>`).join("")
+    : `<div class="simcard-balance-history-row simcard-balance-history-empty">No recorded history yet — this builds up one day at a time.</div>`;
+  row.innerHTML = `
+    <td colspan="${SIMCARD_COLUMNS.length}">
+      <div class="simcard-balance-history">
+        <div class="simcard-balance-history-title">${title}</div>
+        <div class="simcard-balance-history-list">${listHtml}</div>
+      </div>
+    </td>
+  `;
+  return row;
+}
+function toggleSimBalanceHistory(msisdn){
+  if (expandedSimBalanceHistory.has(msisdn)) expandedSimBalanceHistory.delete(msisdn);
+  else expandedSimBalanceHistory.add(msisdn);
+  renderSimCardsTableOnly();
 }
 
 const SIMCARD_COLUMNS = [
@@ -3244,7 +3298,10 @@ function buildSimCardsTable(){
   const maxYesterdayUsage = Math.max(0, ...sims.map(s => s.yesterday_usage_mb || 0));
   const runoutDates = sims.map(s => s.expected_runout_date).filter(Boolean);
   const earliestRunoutDate = runoutDates.length ? runoutDates.reduce((min, d) => d < min ? d : min) : null;
-  sims.forEach(sim => tbody.appendChild(buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate)));
+  sims.forEach(sim => {
+    tbody.appendChild(buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate));
+    if (expandedSimBalanceHistory.has(sim.msisdn)) tbody.appendChild(buildSimCardBalanceHistoryRow(sim));
+  });
   return wrap;
 }
 function renderSimCardsTableOnly(){
@@ -6355,6 +6412,11 @@ document.addEventListener("click", (e) => {
   const sortSimCardsEl = e.target.closest("[data-sort-key]");
   if (sortSimCardsEl){
     toggleSimCardsSort(sortSimCardsEl.dataset.sortKey);
+    return;
+  }
+  const toggleSimHistoryEl = e.target.closest("[data-toggle-sim-history]");
+  if (toggleSimHistoryEl){
+    toggleSimBalanceHistory(toggleSimHistoryEl.dataset.toggleSimHistory);
     return;
   }
   const toggleStatusEl = e.target.closest("[data-toggle-status]");
