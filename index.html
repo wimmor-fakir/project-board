@@ -3194,7 +3194,7 @@ function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
     <td>${sim.expected_runout_date ? formatDateWithYear(sim.expected_runout_date) : "—"}${isSoonestRunout ? '<span class="simcard-flag-badge" title="Earliest expected data run-out">Soonest</span>' : ""}</td>
     <td class="mono" title="Last recharge + the bundle's 30-day validity window.">${sim.runout_due_to_recharge_date ? formatDateWithYear(sim.runout_due_to_recharge_date) : "—"}</td>
     <td class="mono" title="Current balance projected forward at the average daily usage rate.">${sim.runout_due_to_usage_date ? formatDateWithYear(sim.runout_due_to_usage_date) : "—"}</td>
-    <td class="mono" title="A day where balance is higher than the day before is treated as a recharge; falls back to SIMcontrol's own recharge record if none is found. Used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
+    <td class="mono" title="A day where the stored daily balance is higher than the day before is treated as a recharge. Used for Expected data runout.">${sim.last_recharge_date ? formatDateWithYear(sim.last_recharge_date) : "—"}</td>
   `;
   return row;
 }
