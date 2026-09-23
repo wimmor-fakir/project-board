@@ -754,6 +754,49 @@
     background:var(--ink-3); width:11px; height:11px;
     clip-path: polygon(0 0, 60% 0, 100% 50%, 60% 100%, 0 100%, 40% 50%);
   }
+  .tab-dot.mytasks-dot{
+    background:none; width:6px; height:10px; margin:0 2px;
+    border-right:2px solid var(--ink-3); border-bottom:2px solid var(--ink-3);
+    transform:rotate(45deg) translate(-1px, -2px);
+  }
+
+  /* ---------- My Tasks panel ---------- */
+  .mytasks-section{ margin-bottom:26px; }
+  .mytasks-section-head{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    margin-bottom:10px;
+  }
+  .mytasks-section-head .settings-section-title{ margin-bottom:0; }
+  .mytasks-private-note{ font-size:11.5px; color:var(--ink-3); }
+  .mytasks-add{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .mytasks-add input, .mytasks-person-pick select, .mytask-text-input{
+    font: inherit; font-size:13px; color:var(--ink);
+    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
+    padding:7px 10px;
+  }
+  .mytasks-add input:focus, .mytasks-person-pick select:focus, .mytask-text-input:focus{
+    outline:2px solid var(--focus); outline-offset:1px; background:var(--surface);
+  }
+  .mytasks-add input[type="text"]{ flex:1 1 240px; min-width:0; }
+  .mytasks-add input[type="date"]{ flex:0 0 auto; }
+  .mytasks-person-pick{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-2); }
+  .mytasks-person-pick select{ font-size:12.5px; padding:5px 8px; }
+  .mytasks-guess-hint{ font-size:11px; color:var(--ink-3); }
+  .mytask-row{
+    display:grid; grid-template-columns:auto 1fr auto auto; gap:10px; align-items:center;
+    padding:9px 16px; border-top:1px solid var(--border);
+  }
+  .mytask-row:first-child{ border-top:none; }
+  .mytask-row:hover{ background:var(--surface-sunken); }
+  .mytask-check{ width:15px; height:15px; margin:0; cursor:pointer; }
+  .mytask-text{ font-size:13.5px; min-width:0; overflow-wrap:anywhere; cursor:text; border-radius:4px; }
+  .mytask-text:hover{ text-decoration:underline; text-decoration-color:var(--border-strong); }
+  .mytask-row.done .mytask-text{ color:var(--ink-3); text-decoration:line-through; text-decoration-color:var(--border-strong); }
+  .mytask-date{ white-space:nowrap; }
+  .mytask-date.empty{ color:var(--ink-3); }
+  .mytask-text-input{ width:100%; padding:4px 8px; }
+  .mytasks-empty{ padding:12px 16px; font-size:12.5px; color:var(--ink-3); font-style:italic; }
+  .mytasks-done-toggle{ margin-top:8px; }
 
   /* ---------- Settings panel ---------- */
   .settings-section{
@@ -1910,6 +1953,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "forecasting", label: "Forecasting" },
   { key: "goals", label: "Goals" },
   { key: "leave", label: "Leave" },
+  { key: "mytasks", label: "My Tasks" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2048,6 +2092,7 @@ function revealApp(){
   document.querySelector(".app").hidden = false;
 }
 function showAuthGate(){
+  clearMyTasksState();
   document.querySelector(".app").hidden = true;
   document.getElementById("authGateBackdrop").hidden = false;
   document.getElementById("signOutBtn").hidden = true;
@@ -2381,6 +2426,24 @@ function renderRail(){
   `;
   peopleTab.addEventListener("click", () => selectProject("people"));
   rail.appendChild(peopleTab);
+
+  if (hasPageAccess("mytasks")){
+    const myTasksTab = document.createElement("button");
+    myTasksTab.className = "tab";
+    myTasksTab.role = "tab";
+    myTasksTab.id = "tab-mytasks";
+    myTasksTab.dataset.id = "mytasks";
+    myTasksTab.setAttribute("aria-controls", "panel-mytasks");
+    myTasksTab.innerHTML = `
+      <span class="tab-dot mytasks-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">My Tasks</div>
+        <div class="tab-meta">Private list + assigned</div>
+      </span>
+    `;
+    myTasksTab.addEventListener("click", () => selectProject("mytasks"));
+    rail.appendChild(myTasksTab);
+  }
 
   if (hasPageAccess("settings")){
     const settingsTab = document.createElement("button");
@@ -2993,6 +3056,13 @@ leavePanel.id = "panel-leave";
 leavePanel.role = "tabpanel";
 leavePanel.setAttribute("aria-labelledby", "tab-leave");
 panelsEl.appendChild(leavePanel);
+
+const myTasksPanel = document.createElement("section");
+myTasksPanel.className = "panel";
+myTasksPanel.id = "panel-mytasks";
+myTasksPanel.role = "tabpanel";
+myTasksPanel.setAttribute("aria-labelledby", "tab-mytasks");
+panelsEl.appendChild(myTasksPanel);
 
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
@@ -4680,6 +4750,298 @@ async function renderLeave(){
   renderLeaveContent();
 }
 
+/* ---------- My Tasks ---------- */
+// Private tasks live in personal_tasks, whose RLS only ever lets a user
+// see their own rows — they never touch board_state, so nothing here can
+// leak onto another page or to another person.
+let personalTasks = [];
+let myTasksPersonSetting = null; // saved "which person am I" for the assigned list, or null if never picked
+let myTasksLoadedFor = null;     // auth user id whose private data is in memory
+let myTasksLoadingFor = null;
+let myTasksShowDonePrivate = false;
+let myTasksShowDoneAssigned = false;
+
+function escapeHtmlText(s){
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function clearMyTasksState(){
+  personalTasks = [];
+  myTasksPersonSetting = null;
+  myTasksLoadedFor = null;
+  myTasksLoadingFor = null;
+  myTasksPanel.innerHTML = "";
+}
+function guessMyPersonName(){
+  const local = ((authSession && authSession.user.email) || "").split("@")[0].toLowerCase();
+  const asName = local.replace(/[._-]+/g, " ");
+  const first = local.split(/[._-]/)[0];
+  return PEOPLE_ORDER.find(n => n.toLowerCase() === asName)
+    || PEOPLE_ORDER.find(n => n.split(" ")[0].toLowerCase() === first)
+    || "";
+}
+function myTasksPersonName(){
+  return myTasksPersonSetting || guessMyPersonName();
+}
+
+async function renderMyTasks(){
+  if (!hasPageAccess("mytasks")) return;
+  if (!supabaseClient || !authSession){
+    myTasksPanel.innerHTML = `<p class="summary-facts">Sign in to see your tasks.</p>`;
+    return;
+  }
+  const userId = authSession.user.id;
+  if (myTasksLoadingFor === userId) return;
+  myTasksLoadingFor = userId;
+  myTasksPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const [tasksRes, settingsRes] = await Promise.all([
+    supabaseClient.from("personal_tasks").select("*").eq("user_id", userId),
+    supabaseClient.from("personal_task_settings").select("person_name").eq("user_id", userId).maybeSingle(),
+  ]);
+  myTasksLoadingFor = null;
+  if (!authSession || authSession.user.id !== userId) return; // signed out / switched account while loading
+  if (tasksRes.error || settingsRes.error){
+    if (currentId === "mytasks") myTasksPanel.innerHTML = `<p class="summary-facts">Couldn't load your tasks — has supabase-personal-tasks.sql been run yet? (${escapeHtmlText((tasksRes.error || settingsRes.error).message)})</p>`;
+    return;
+  }
+  personalTasks = tasksRes.data || [];
+  myTasksPersonSetting = (settingsRes.data && settingsRes.data.person_name) || null;
+  myTasksLoadedFor = userId;
+  if (currentId === "mytasks") renderMyTasksContent();
+}
+
+function renderMyTasksContent(){
+  myTasksPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>Your own private to-do list, plus every action item assigned to you on the board.</p>
+      <button type="button" class="btn btn-new" id="refreshMyTasksBtn">↻ Refresh</button>
+    </div>
+    <div class="mytasks-section">
+      <div class="mytasks-section-head">
+        <div class="settings-section-title">My private tasks</div>
+        <span class="mytasks-private-note">Only visible to you — not shown on any other page or to anyone else.</span>
+      </div>
+      <form class="mytasks-add" id="myTasksAddForm" autocomplete="off">
+        <input type="text" id="myTaskNewText" placeholder="Add a private task…" maxlength="500" aria-label="New private task">
+        <input type="date" id="myTaskNewDate" aria-label="Due date (optional)" title="Due date (optional)">
+        <button type="submit" class="btn btn-secondary">Add</button>
+      </form>
+      <div class="modal-error" id="myTasksError" hidden></div>
+      <div id="myPrivateTasksWrap"></div>
+    </div>
+    <div class="mytasks-section">
+      <div id="myAssignedWrap"></div>
+    </div>
+  `;
+  document.getElementById("refreshMyTasksBtn").addEventListener("click", () => { myTasksLoadedFor = null; renderMyTasks(); });
+  document.getElementById("myTasksAddForm").addEventListener("submit", (e) => { e.preventDefault(); addPersonalTask(); });
+  renderMyPrivateTasks();
+  renderMyAssignedTasks();
+}
+
+function privateTaskDateClass(t){
+  if (t.done || !t.due_date) return "";
+  if (t.due_date < TODAY_STR) return "overdue";
+  if (t.due_date === TODAY_STR) return "due-today";
+  return "";
+}
+function buildPrivateTaskRow(t){
+  return `
+    <div class="mytask-row${t.done ? " done" : ""}">
+      <input type="checkbox" class="mytask-check" data-toggle-private-task="${t.id}" ${t.done ? "checked" : ""} aria-label="Mark done">
+      <span class="mytask-text" data-edit-private-task-text="${t.id}" title="Click to edit">${escapeHtmlText(t.text)}</span>
+      <span class="item-date mytask-date ${t.due_date ? privateTaskDateClass(t) : "empty"}" data-edit-private-task-date="${t.id}" title="Click to ${t.due_date ? "change" : "set a"} due date">${t.due_date ? formatDate(t.due_date) : "+ Date"}</span>
+      <button type="button" class="person-remove-btn-inline" data-delete-private-task="${t.id}" title="Delete this task" aria-label="Delete this task">×</button>
+    </div>`;
+}
+function renderMyPrivateTasks(){
+  const wrap = document.getElementById("myPrivateTasksWrap");
+  if (!wrap) return;
+  const open = personalTasks.filter(t => !t.done).sort((a, b) =>
+    (a.due_date || "9999-12-31").localeCompare(b.due_date || "9999-12-31") || a.created_at.localeCompare(b.created_at));
+  const done = personalTasks.filter(t => t.done).sort((a, b) => (b.done_at || "").localeCompare(a.done_at || ""));
+  const openHtml = open.length
+    ? open.map(buildPrivateTaskRow).join("")
+    : `<div class="mytasks-empty">${personalTasks.length ? "All done — nothing open." : "No private tasks yet — add one above."}</div>`;
+  wrap.innerHTML = `
+    <div class="person-group"><div class="item-list">${openHtml}</div></div>
+    ${done.length ? `<button type="button" class="filter-clear mytasks-done-toggle" id="myPrivateDoneToggle">${myTasksShowDonePrivate ? "Hide" : "Show"} ${done.length} completed</button>` : ""}
+    ${done.length && myTasksShowDonePrivate ? `<div class="person-group" style="margin-top:8px;"><div class="item-list">${done.map(buildPrivateTaskRow).join("")}</div></div>` : ""}
+  `;
+  const toggle = document.getElementById("myPrivateDoneToggle");
+  if (toggle) toggle.addEventListener("click", () => { myTasksShowDonePrivate = !myTasksShowDonePrivate; renderMyPrivateTasks(); });
+}
+
+function renderMyAssignedTasks(){
+  const wrap = document.getElementById("myAssignedWrap");
+  if (!wrap) return;
+  const name = myTasksPersonName();
+  const options = [`<option value="">— Pick your name —</option>`]
+    .concat(PEOPLE_ORDER.map(n => `<option value="${escapeHtmlText(n)}" ${n === name ? "selected" : ""}>${escapeHtmlText(n)}</option>`))
+    .join("");
+  const guessed = name && !myTasksPersonSetting;
+  let listHtml;
+  if (!name){
+    listHtml = `<p class="summary-facts">Pick your name above to see the action items assigned to you.</p>`;
+  } else {
+    const items = ACTIONS.filter(a => a.people.includes(name)).map(item => ({
+      ...item,
+      projectTags: item.projectIds.map(pid => PROJECTS.find(p => p.id === pid)).filter(Boolean)
+        .map(p => ({ id: p.id, name: p.name, health: p.health })),
+    }));
+    const open = items.filter(it => !actionStatusOption(it.status).isDone).sort((a, b) => a.date.localeCompare(b.date));
+    const done = items.filter(it => actionStatusOption(it.status).isDone).sort((a, b) => b.date.localeCompare(a.date));
+    listHtml = `
+      <div class="person-group"><div class="item-list">${open.length ? open.map(it => buildPersonRow(it, name)).join("") : `<div class="mytasks-empty">Nothing open is assigned to ${escapeHtmlText(name)}.</div>`}</div></div>
+      ${done.length ? `<button type="button" class="filter-clear mytasks-done-toggle" id="myAssignedDoneToggle">${myTasksShowDoneAssigned ? "Hide" : "Show"} ${done.length} completed</button>` : ""}
+      ${done.length && myTasksShowDoneAssigned ? `<div class="person-group" style="margin-top:8px;"><div class="item-list">${done.map(it => buildPersonRow(it, name)).join("")}</div></div>` : ""}
+    `;
+  }
+  wrap.innerHTML = `
+    <div class="mytasks-section-head">
+      <div class="settings-section-title">Assigned to me in the action list</div>
+      <label class="mytasks-person-pick">Showing items for
+        <select id="myTasksPersonSelect">${options}</select>
+        ${guessed ? `<span class="mytasks-guess-hint">(guessed from your email)</span>` : ""}
+      </label>
+    </div>
+    ${listHtml}
+  `;
+  document.getElementById("myTasksPersonSelect").addEventListener("change", (e) => saveMyTasksPerson(e.target.value));
+  const toggle = document.getElementById("myAssignedDoneToggle");
+  if (toggle) toggle.addEventListener("click", () => { myTasksShowDoneAssigned = !myTasksShowDoneAssigned; renderMyAssignedTasks(); });
+}
+
+function showMyTasksError(message){
+  const el = document.getElementById("myTasksError");
+  if (!el) { alert(message); return; }
+  el.textContent = message;
+  el.hidden = !message;
+}
+async function saveMyTasksPerson(name){
+  const previous = myTasksPersonSetting;
+  myTasksPersonSetting = name || null;
+  renderMyAssignedTasks();
+  const { error } = await supabaseClient.from("personal_task_settings").upsert({
+    user_id: authSession.user.id,
+    person_name: name || null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+  if (error){
+    myTasksPersonSetting = previous;
+    renderMyAssignedTasks();
+    showMyTasksError("Couldn't save your name choice: " + error.message);
+  }
+}
+async function addPersonalTask(){
+  const textEl = document.getElementById("myTaskNewText");
+  const dateEl = document.getElementById("myTaskNewDate");
+  const text = textEl.value.trim();
+  if (!text) { textEl.focus(); return; }
+  showMyTasksError("");
+  textEl.disabled = true;
+  const { data, error } = await supabaseClient.from("personal_tasks").insert({
+    user_id: authSession.user.id,
+    text,
+    due_date: dateEl.value || null,
+  }).select().single();
+  textEl.disabled = false;
+  if (error){
+    showMyTasksError("Couldn't add the task — has supabase-personal-tasks.sql been run yet? (" + error.message + ")");
+    return;
+  }
+  personalTasks.push(data);
+  textEl.value = "";
+  dateEl.value = "";
+  renderMyPrivateTasks();
+  textEl.focus();
+}
+async function updatePersonalTask(id, changes){
+  const task = personalTasks.find(t => t.id === id);
+  if (!task) return;
+  const before = { ...task };
+  Object.assign(task, changes, { updated_at: new Date().toISOString() });
+  renderMyPrivateTasks();
+  const { error } = await supabaseClient.from("personal_tasks").update({ ...changes, updated_at: task.updated_at }).eq("id", id);
+  if (error){
+    Object.assign(task, before);
+    renderMyPrivateTasks();
+    showMyTasksError("Couldn't save that change: " + error.message);
+  }
+}
+async function deletePersonalTask(id){
+  const task = personalTasks.find(t => t.id === id);
+  if (!task || !window.confirm(`Delete "${task.text}"?`)) return;
+  const { error } = await supabaseClient.from("personal_tasks").delete().eq("id", id);
+  if (error){ showMyTasksError("Couldn't delete the task: " + error.message); return; }
+  personalTasks = personalTasks.filter(t => t.id !== id);
+  renderMyPrivateTasks();
+}
+function openPrivateTaskTextEditor(el, id){
+  const task = personalTasks.find(t => t.id === id);
+  if (!task) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 500;
+  input.className = "mytask-text-input";
+  input.value = task.text;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const finish = (save) => {
+    if (settled) return;
+    settled = true;
+    const text = input.value.trim();
+    if (save && text && text !== task.text) updatePersonalTask(id, { text });
+    else renderMyPrivateTasks();
+  };
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+}
+function openPrivateTaskDateEditor(el, id){
+  const task = personalTasks.find(t => t.id === id);
+  if (!task) return;
+  const input = document.createElement("input");
+  input.type = "date";
+  input.className = "inline-date-input";
+  input.style.width = "auto";
+  input.value = task.due_date || "";
+  el.replaceWith(input);
+  input.focus();
+  if (input.showPicker){ try { input.showPicker(); } catch (err) {} }
+  let settled = false;
+  const finish = (save) => {
+    if (settled) return;
+    settled = true;
+    const value = input.value || null;
+    if (save && value !== (task.due_date || null)) updatePersonalTask(id, { due_date: value });
+    else renderMyPrivateTasks();
+  };
+  input.addEventListener("change", () => finish(true));
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+}
+myTasksPanel.addEventListener("click", (e) => {
+  const textEl = e.target.closest("[data-edit-private-task-text]");
+  if (textEl){ openPrivateTaskTextEditor(textEl, textEl.dataset.editPrivateTaskText); return; }
+  const dateEl = e.target.closest("[data-edit-private-task-date]");
+  if (dateEl){ openPrivateTaskDateEditor(dateEl, dateEl.dataset.editPrivateTaskDate); return; }
+  const deleteEl = e.target.closest("[data-delete-private-task]");
+  if (deleteEl){ deletePersonalTask(deleteEl.dataset.deletePrivateTask); return; }
+});
+myTasksPanel.addEventListener("change", (e) => {
+  const check = e.target.closest("[data-toggle-private-task]");
+  if (check) updatePersonalTask(check.dataset.togglePrivateTask, { done: check.checked, done_at: check.checked ? new Date().toISOString() : null });
+});
+
 function renderSettings(){
   if (!hasPageAccess("settings")) return;
   const healthRows = HEALTH_OPTIONS.map(opt => buildSettingsStatusRow(
@@ -5233,7 +5595,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals" && panel.id !== "panel-leave") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals" && panel.id !== "panel-leave" && panel.id !== "panel-mytasks") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -5283,6 +5645,7 @@ function selectProject(id){
   const enteringForecasting = entering("forecasting");
   const enteringGoals = entering("goals");
   const enteringLeave = entering("leave");
+  const enteringMyTasks = entering("mytasks");
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
@@ -5323,6 +5686,14 @@ function selectProject(id){
     mainTitleEl.textContent = "Leave 2026 -2027 Financial Year Calculator";
     document.getElementById("crumb").textContent = "Overview";
     if (enteringLeave) renderLeave();
+  } else if (id === "mytasks"){
+    mainTitleEl.textContent = "My Tasks";
+    document.getElementById("crumb").textContent = "Overview";
+    // Also reload when the signed-in user differs from whoever's private
+    // tasks are in memory (first load after sign-in, or a different account).
+    const loadedForSomeoneElse = !authSession || myTasksLoadedFor !== authSession.user.id;
+    if (enteringMyTasks || loadedForSomeoneElse) renderMyTasks();
+    else renderMyAssignedTasks();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);

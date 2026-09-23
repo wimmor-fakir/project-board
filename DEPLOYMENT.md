@@ -81,6 +81,10 @@ when you open the live site** — all one-time, no-code steps:
      "Leave page" checkboxes** (which choose whose leave shows on the
      Leave page)? Run `supabase-migration-leave-show-on-leave.sql` once —
      it adds the `show_on_leave` column, defaulting everyone to shown.
+   - **Run `supabase-personal-tasks.sql`** too — creates the tables
+     behind the My Tasks page (each person's private to-do list, plus
+     which board person they are). Unlike every other table here, its
+     security rules only let each user see their own rows.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -335,7 +339,7 @@ still letting the app call it safely over the internet.
    a list of current users instead of an error.
 
 **Already had this function deployed before per-page access existed
-(or before Team Update, Forecasting, Goals, or Leave were added)?**
+(or before Team Update, Forecasting, Goals, Leave, or My Tasks were added)?**
 Re-copy `supabase-edge-function/manage-users.ts` into it and redeploy
 (steps 4-5 above) to pick up the checkboxes. One consequence worth
 knowing: the moment this redeploys, everyone except the admin loses
@@ -498,6 +502,7 @@ typed.
 | Already had an earlier version with entitlement/applications/adjustments instead of BOP? Run `supabase-migration-leave-bop.sql` once | Adds the `bop` column — old data is kept, just no longer read/written |
 | Already had BOP but a flat 25 instead of editable PaySpace Entitlement? Run `supabase-migration-leave-payspace-entitlement.sql` once | Adds the `payspace_entitlement` column, defaulting every row to 25 |
 | Already had the Leave page but no Settings → Leave page checkboxes? Run `supabase-migration-leave-show-on-leave.sql` once | Adds the `show_on_leave` column, defaulting everyone to shown |
+| Run `supabase-personal-tasks.sql` too | Creates the tables behind the My Tasks page — private to-do lists that only their owner can read or change |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
