@@ -172,19 +172,26 @@ Deno.serve(async (req) => {
       );
     }
 
-    // History is only expected from this date onward — days before it were
-    // never recorded (the table didn't exist yet) unless backfilled by hand.
-    const HISTORY_START_DATE = "2026-09-01";
+    // History is only expected from 1 Sep 2026 onward — days before it
+    // were never recorded (the table didn't exist yet) unless backfilled
+    // by hand. Also capped to a rolling 60-day window so this query (and
+    // the balance_history returned to the client for the SIM Cards page's
+    // expandable per-SIM history) doesn't grow unbounded as more days
+    // accumulate — recharge detection only needs recent data anyway.
+    const EARLIEST_HISTORY_DATE = "2026-09-01";
+    const HISTORY_LOOKBACK_DAYS = 60;
+    const rollingStartDate = addDays(today, -HISTORY_LOOKBACK_DAYS);
+    const historyStartDate = rollingStartDate > EARLIEST_HISTORY_DATE ? rollingStartDate : EARLIEST_HISTORY_DATE;
     const { data: historyRows } = await adminClient
       .from("sim_daily_balances")
       .select("msisdn, date, balance_mb")
-      .gte("date", HISTORY_START_DATE)
+      .gte("date", historyStartDate)
       .lte("date", today)
       .order("date", { ascending: false });
-    const balanceHistoryByMsisdn: Record<string, { date: string; balance: number }[]> = {};
+    const balanceHistoryByMsisdn: Record<string, { date: string; balance_mb: number }[]> = {};
     (historyRows || []).forEach((row: { msisdn: string; date: string; balance_mb: number }) => {
       if (!balanceHistoryByMsisdn[row.msisdn]) balanceHistoryByMsisdn[row.msisdn] = [];
-      balanceHistoryByMsisdn[row.msisdn].push({ date: row.date, balance: Number(row.balance_mb) });
+      balanceHistoryByMsisdn[row.msisdn].push({ date: row.date, balance_mb: Number(row.balance_mb) });
     });
     // A recharge shows up as the balance being higher than the reading
     // before it (balance otherwise only ever goes down, from usage). Walks
@@ -193,7 +200,7 @@ Deno.serve(async (req) => {
     function balanceJumpRechargeDate(msisdn: string): string | null {
       const series = balanceHistoryByMsisdn[msisdn] || [];
       for (let i = 0; i < series.length - 1; i++) {
-        if (series[i].balance > series[i + 1].balance) return series[i].date;
+        if (series[i].balance_mb > series[i + 1].balance_mb) return series[i].date;
       }
       return null;
     }
@@ -253,6 +260,9 @@ Deno.serve(async (req) => {
         runout_due_to_recharge_date: bundleExpiryDate,
         runout_due_to_usage_date: balanceRunoutDate,
         last_recharge_date: lastRecharge,
+        // Newest first, capped at HISTORY_LOOKBACK_DAYS — the SIM Cards
+        // page shows this when a row is expanded.
+        balance_history: balanceHistoryByMsisdn[msisdn] || [],
         created: sim.created,
       });
     }
