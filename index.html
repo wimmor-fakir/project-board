@@ -2140,7 +2140,9 @@ async function loadBoardFromSupabase(){
 
   // These are genuine local changes worth saving — everything else this
   // load produced was just a render of what's already on the server.
-  if (isFirstRun || codesChanged) publishState();
+  // (refreshAll publishes, and re-runs the done-item sweep as a no-op.)
+  if (applyDoneRetention()) refreshAll();
+  else if (isFirstRun || codesChanged) publishState();
 }
 
 let realtimeSubscribed = false;
@@ -2368,6 +2370,45 @@ async function logActionChange(actionId, actionCode, changeType, summary, payloa
     });
   } catch (e) { /* best-effort — never block a save on logging failure */ }
 }
+
+/* ---------- Done-item retention ---------- */
+// Action items in a "done" status are deleted DONE_RETENTION_MS after they
+// were marked done, logged to Activity as a (restorable) delete. doneAt is
+// stamped from state rather than at each status-change call site, so every
+// path (inline chip, edit modal, undo, a teammate's edit) is covered; items
+// that were already done before this existed get stamped the first time a
+// client sees them. Only runs against the real database copy of the board,
+// and never while applying someone else's update (that render doesn't
+// publish, so a deletion made then would never be saved).
+const DONE_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
+function canApplyDoneRetention(){
+  return dbReady && !!authSession && !applyingRemoteUpdate && !restoringHistory;
+}
+function applyDoneRetention(){
+  if (!canApplyDoneRetention()) return false;
+  const now = Date.now();
+  let changed = false;
+  ACTIONS.forEach(item => {
+    const isDone = actionStatusOption(item.status).isDone;
+    if (isDone && !item.doneAt){ item.doneAt = new Date(now).toISOString(); changed = true; }
+    else if (!isDone && item.doneAt){ delete item.doneAt; changed = true; }
+  });
+  const expired = ACTIONS.filter(item => item.doneAt && now - new Date(item.doneAt).getTime() >= DONE_RETENTION_MS);
+  expired.forEach(item => {
+    ACTIONS.splice(ACTIONS.indexOf(item), 1);
+    logActionChange(item._id, item.code, "deleted", "Auto-deleted 2 days after being marked done: " + item.text, item);
+    changed = true;
+  });
+  return changed;
+}
+function hasExpiredDoneItems(){
+  const now = Date.now();
+  return ACTIONS.some(item => item.doneAt && actionStatusOption(item.status).isDone && now - new Date(item.doneAt).getTime() >= DONE_RETENTION_MS);
+}
+// A tab left open still clears items as they pass the 2-day mark.
+setInterval(() => {
+  if (canApplyDoneRetention() && !isModalOpen() && hasExpiredDoneItems()) refreshAll();
+}, 15 * 60 * 1000);
 
 let currentId = "summary";
 
@@ -5806,6 +5847,7 @@ function refreshViews(){
 }
 
 function refreshAll(){
+  applyDoneRetention();
   syncRostersFromActions();
   if (PAGE_ACCESS_PAGES.some(p => p.key === currentId) && !hasPageAccess(currentId)) currentId = "summary";
   renderRail();
