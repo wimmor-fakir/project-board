@@ -3,11 +3,17 @@
 // Holds the secret SIMcontrol API key server-side so the app can show SIM
 // card balance/usage without ever exposing that key to the browser. Only
 // the ADMIN_EMAIL account, or a user the admin has granted "SIM Cards"
-// page access to (Settings -> User management), may use it. Deploy this
-// via the Supabase dashboard: Edge Functions -> Deploy a new function ->
-// name it "sim-cards" -> paste this file's contents -> Deploy. Then set
-// the SIMCONTROL_API_KEY secret (Edge Functions -> sim-cards -> Secrets,
-// or `supabase secrets set SIMCONTROL_API_KEY=...`). See DEPLOYMENT.md.
+// page access to (Settings -> User management), may use it — plus a daily
+// scheduled call (see supabase-sim-cards-daily-cron.sql) that authenticates
+// with CRON_SECRET instead of a signed-in user, so the balance history this
+// function records keeps building even on a day nobody opens the page.
+// Deploy this via the Supabase dashboard: Edge Functions -> Deploy a new
+// function -> name it "sim-cards" -> paste this file's contents -> Deploy.
+// Then set two secrets (Edge Functions -> sim-cards -> Secrets, or
+// `supabase secrets set NAME=value`): SIMCONTROL_API_KEY (your SIMcontrol
+// API key) and CRON_SECRET (any random string you make up — it just has to
+// match the one used in supabase-sim-cards-daily-cron.sql). See
+// DEPLOYMENT.md.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -109,18 +115,28 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
-    if (!token) return jsonResponse({ error: "Not signed in" }, 401);
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: { user }, error: userError } = await adminClient.auth.getUser(token);
-    if (userError || !user) return jsonResponse({ error: "Not signed in" }, 401);
-    const hasAccess = user.email === ADMIN_EMAIL || !!(user.user_metadata && user.user_metadata.page_access && user.user_metadata.page_access.simcards);
-    if (!hasAccess) return jsonResponse({ error: "Not authorized" }, 403);
+    // A scheduled call (Supabase's pg_cron -> pg_net, see
+    // supabase-sim-cards-daily-cron.sql) has no signed-in user — it proves
+    // itself with a shared secret in a custom header instead, so the daily
+    // balance snapshot below runs whether or not anyone opens the SIM Cards
+    // page that day. A real page load never sends this header.
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isScheduledRun = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+
+    if (!isScheduledRun) {
+      const authHeader = req.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "");
+      if (!token) return jsonResponse({ error: "Not signed in" }, 401);
+
+      const { data: { user }, error: userError } = await adminClient.auth.getUser(token);
+      if (userError || !user) return jsonResponse({ error: "Not signed in" }, 401);
+      const hasAccess = user.email === ADMIN_EMAIL || !!(user.user_metadata && user.user_metadata.page_access && user.user_metadata.page_access.simcards);
+      if (!hasAccess) return jsonResponse({ error: "Not authorized" }, 403);
+    }
 
     const apiKey = Deno.env.get("SIMCONTROL_API_KEY");
     if (!apiKey) return jsonResponse({ error: "SIMCONTROL_API_KEY secret is not set for this function." }, 500);
