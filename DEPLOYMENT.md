@@ -370,10 +370,12 @@ never be embedded in the app's client-side code, since `index.html` is
 public. This Edge Function holds that key on Supabase's servers instead,
 where the browser never sees it.
 
-1. Run `supabase-sim-recharge-overrides.sql` in Supabase's SQL Editor —
-   this creates the table behind the "click a last-recharge date to
-   edit it" feature on the SIM Cards page (a manually-set date always
-   wins over whatever, if anything, SIMcontrol's own API reports).
+1. Run `supabase-sim-daily-balances.sql` in Supabase's SQL Editor — this
+   creates the table the function writes each SIM's balance to every day
+   it runs, which is how it detects recharges (a day where the balance is
+   higher than the day before). History only starts once this table
+   exists; see the comments at the top of that file for backfilling
+   1 September 2026 onward by hand.
 2. In your Supabase project, go to **Edge Functions** (left sidebar).
 3. Click **Deploy a new function** and name it exactly `sim-cards` (the
    app calls it by this name).
@@ -477,7 +479,7 @@ typed.
 | Already had BOP but a flat 25 instead of editable PaySpace Entitlement? Run `supabase-migration-leave-payspace-entitlement.sql` once | Adds the `payspace_entitlement` column, defaulting every row to 25 |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
-| Run `supabase-sim-recharge-overrides.sql` too | Creates the table behind SIM Cards' "click to edit" last-recharge date (Part 6) |
+| Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
 | Deploy `sim-cards` and set `SIMCONTROL_API_KEY` (Part 6) | Powers the admin-only SIM Cards tab — everything else works without this one |
 | Deploy `payspace` and set `PAYSPACE_CLIENT_ID` / `PAYSPACE_CLIENT_SECRET` (Part 7, optional) | Powers the Leave page's "Sync from PaySpace" read-only comparison columns — everything else on that page works without this one |
 
