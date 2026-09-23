@@ -146,28 +146,13 @@ Deno.serve(async (req) => {
     const yesterday = historyDays[0];
     const recentDays = historyDays.slice(0, 7);
 
-    // Wide window — this account may have no recharges yet, which is fine.
-    const recharges = await fetchAllPages(`/recharge?start_date=2000-01-01&end_date=${today}`, apiKey);
-
-    // The exact field names on a recharge record are unconfirmed (this
-    // account has never had one to inspect) — check a few likely spellings.
-    const lastRechargeByMsisdn: Record<string, string> = {};
-    for (const r of recharges) {
-      const msisdn = r.msisdn || r.number || r.sim_msisdn;
-      const dateVal = r.recharged_at || r.date || r.created || r.timestamp || r.created_at;
-      if (!msisdn || !dateVal) continue;
-      const dateStr = String(dateVal).slice(0, 10);
-      if (!lastRechargeByMsisdn[msisdn] || dateStr > lastRechargeByMsisdn[msisdn]) {
-        lastRechargeByMsisdn[msisdn] = dateStr;
-      }
-    }
-
     // UNVERIFIED: the field name SIMcontrol uses for a day's balance on the
     // /usage record hasn't been confirmed against a real response (the API
     // docs only describe `data` as an untyped object) — check a few likely
     // spellings. If none of them are present, balanceJumpRechargeDate below
-    // simply finds nothing for that SIM and the /recharge-endpoint value is
-    // used instead. Verify/adjust this once deployed against real data.
+    // simply finds nothing for that SIM — this is now the only source for
+    // last-recharge, so a wrong guess here means no date at all, not a
+    // fallback. Verify/adjust this once deployed against real data.
     function extractBalanceMb(entry: any): number | null {
       const raw = entry?.data_balance_in_mb ?? entry?.balance_mb ?? entry?.balance
         ?? entry?.closing_balance_mb ?? entry?.closing_balance ?? entry?.remaining_balance_mb;
@@ -191,21 +176,15 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    // Prefers the balance-jump date (see above); if that finds nothing
-    // (e.g. the balance field guess above is wrong, or no jump fell inside
-    // the lookback window) it falls back to the /recharge endpoint's own
-    // record. There's no manual override anymore — this is the only source
-    // for last-recharge, used as-is for the bundle-expiry runout candidate.
-    function effectiveRecharge(msisdn: string, todayBalanceMb: number): string | null {
-      return balanceJumpRechargeDate(msisdn, todayBalanceMb) || lastRechargeByMsisdn[msisdn] || null;
-    }
-
     const results = [];
     for (const sim of sims) {
       const msisdn = sim.msisdn;
       const simCreatedDate = toDateStr(new Date(sim.created));
       const balanceMb = num(sim.data_balance_in_mb);
-      const lastRecharge = effectiveRecharge(msisdn, balanceMb);
+      // The only source for last-recharge now (no /recharge-endpoint
+      // fallback, no manual override) — used as-is for the bundle-expiry
+      // runout candidate below.
+      const lastRecharge = balanceJumpRechargeDate(msisdn, balanceMb);
 
       // Only count days the SIM actually existed for.
       const last7DaysUsage = recentDays
@@ -225,8 +204,8 @@ Deno.serve(async (req) => {
         balanceRunoutDate = toDateStr(d);
       }
       // Candidate 2: the data bundle's own 30-day validity window from the
-      // last recharge (see effectiveRecharge above) — data is lost at this
-      // point even if balance remains.
+      // last recharge (see balanceJumpRechargeDate above) — data is lost at
+      // this point even if balance remains.
       const bundleExpiryDate = lastRecharge ? addDays(lastRecharge, 30) : null;
 
       // The SIM runs out of usable data at whichever of the two comes first.
