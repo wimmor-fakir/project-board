@@ -789,10 +789,12 @@
     text-align:left; white-space:normal; display:flex; gap:6px; align-items:flex-start;
   }
   .burn-table tr.burn-section-row .burn-section-toggle:hover{ color:var(--accent); }
-  .burn-table tr.burn-subtotal-row td{ font-weight:700; border-top:1px solid var(--border-strong); }
   .burn-table tr.burn-total-row td{ font-weight:700; background:var(--accent-soft); }
-  .burn-table tr.burn-grand-row td{ font-weight:700; border-top:2px solid var(--ink-2); background:var(--accent-soft); }
+  .burn-table tr.burn-grand-row td{ font-weight:700; border-bottom:2px solid var(--ink-2); background:var(--accent-soft); }
+  .burn-table tr.burn-revenue-row td{ font-weight:700; background:var(--success-soft); color:var(--success); text-align:center; }
+  .burn-table tr.burn-revenue-row td.burn-account-cell{ text-align:left; }
   .burn-table tr.burn-total-row:hover td, .burn-table tr.burn-grand-row:hover td{ background:var(--accent-soft); }
+  .burn-table tr.burn-revenue-row:hover td{ background:var(--success-soft); }
   .burn-notes{ margin-top:18px; font-size:12px; color:var(--ink-2); max-width:1000px; }
   .burn-notes ol{ margin:8px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:5px; }
   .burn-notes .burn-source{ margin-top:10px; color:var(--ink-3); }
@@ -4248,6 +4250,17 @@ async function renderForecasting(){
     return;
   }
   forecastingPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const loaded = await loadForecastData();
+  if (currentId !== "forecasting") return; // user navigated away while this was loading
+  if (!loaded){
+    forecastingPanel.innerHTML = `<p class="summary-facts">Couldn't load forecasting data — has supabase-project-forecasts.sql been run yet?</p>`;
+    return;
+  }
+  renderForecastingContent();
+}
+// Fills forecastLines / forecastData; returns false if either query failed.
+// Also used by Burn Forecasting for its monthly revenue row.
+async function loadForecastData(){
   const [linesResult, forecastsResult] = await Promise.all([
     supabaseClient.from("forecast_lines").select("*").order("sort_order", { ascending: true }),
     supabaseClient
@@ -4256,11 +4269,7 @@ async function renderForecasting(){
       .gte("month", FORECAST_MONTHS[0])
       .lte("month", FORECAST_MONTHS[FORECAST_MONTHS.length - 1]),
   ]);
-  if (currentId !== "forecasting") return; // user navigated away while this was loading
-  if (linesResult.error || forecastsResult.error){
-    forecastingPanel.innerHTML = `<p class="summary-facts">Couldn't load forecasting data — has supabase-project-forecasts.sql been run yet?</p>`;
-    return;
-  }
+  if (linesResult.error || forecastsResult.error) return false;
   forecastLines = {};
   linesResult.data.forEach(row => {
     if (!forecastLines[row.project_id]) forecastLines[row.project_id] = [];
@@ -4271,7 +4280,11 @@ async function renderForecasting(){
     if (!forecastData[row.line_id]) forecastData[row.line_id] = {};
     forecastData[row.line_id][row.month] = { locations: row.locations, price: Number(row.price) };
   });
-  renderForecastingContent();
+  return true;
+}
+// Same total the Forecasting chart shows for a month (lines excluded from the chart are left out).
+function totalForecastRevenue(month){
+  return PROJECTS.reduce((sum, p) => sum + projectForecastRevenue(p.id, month), 0);
 }
 
 /* ---------- Goals ---------- */
@@ -5175,7 +5188,15 @@ let burnForecast = null;
 let burnForecastMeta = null;
 let burnForecastLoadedFor = null;
 let burnForecastSaveError = null;
+let burnRevenueAvailable = false;
 const burnCollapsedSections = new Set();
+const BURN_MONTH_INDEX = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+// "Sep 2026" -> "2026-09-01" (the Forecasting page's month key), or null if unrecognised.
+function burnMonthKey(label){
+  const m = String(label).trim().match(/^([A-Za-z]{3})[a-z]*\s+(\d{4})$/);
+  if (!m || !(m[1] in BURN_MONTH_INDEX)) return null;
+  return `${m[2]}-${String(BURN_MONTH_INDEX[m[1]] + 1).padStart(2, "0")}-01`;
+}
 
 function clearBurnForecastState(){
   burnForecast = null;
@@ -5219,8 +5240,12 @@ async function renderBurnForecast(){
   }
   const userId = authSession.user.id;
   burnForecastPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
-  const { data, error } = await supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle();
+  const [{ data, error }, revenueLoaded] = await Promise.all([
+    supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle(),
+    loadForecastData(),
+  ]);
   if (!authSession || authSession.user.id !== userId) return;
+  burnRevenueAvailable = revenueLoaded;
   if (error){
     if (currentId === "burnforecast") burnForecastPanel.innerHTML = `<p class="summary-facts">Couldn't load Burn Forecasting — has supabase-burn-forecast.sql been run yet? (${escapeHtmlText(error.message)})</p>`;
     return;
@@ -5266,7 +5291,18 @@ function renderBurnForecastContent(){
   const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
-  let body = "";
+  // One revenue figure per month (spanning that month's A and B columns).
+  const revenueCells = [];
+  cols.forEach((c, i) => {
+    if (!monthStart[i]) return;
+    let span = 1;
+    while (i + span < cols.length && cols[i + span].month === c.month) span++;
+    const key = burnMonthKey(c.month);
+    const text = !burnRevenueAvailable ? "—" : key && FORECAST_MONTHS.includes(key) ? formatZar(totalForecastRevenue(key)) : "—";
+    revenueCells.push(`<td colspan="${span}" class="forecast-month-divider">${text}</td>`);
+  });
+  let body = `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Forecasting page</span></td>${revenueCells.join("")}</tr>`;
+  body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
     // A trailing "(…)" in the sheet's heading is an explanatory aside — shown small, under the name.
@@ -5280,12 +5316,10 @@ function renderBurnForecastContent(){
         body += `<tr><td class="forecast-project-cell burn-account-cell burn-account-name">${escapeHtmlText(a.name)}</td>${numCells(i => a.values[i], `${si}:${ai}`)}</tr>`;
       });
     }
-    body += `<tr class="burn-subtotal-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(s.subtotal)}</td>${numCells(i => burnSectionSubtotal(s, i))}</tr>`;
     if (si === lastOpexIndex){
       body += `<tr class="burn-total-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.opexTotalLabel || "Total Operating Expenses")}</td>${numCells(i => burnOpexTotal(p, i))}</tr>`;
     }
   });
-  body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
 
   const notesHtml = (p.notes && p.notes.length) || p.sourceNote ? `
     <div class="burn-notes">
@@ -5314,7 +5348,7 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. A = Actual, B = Budget. Click any account cell to edit it — heading, subtotal and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+      <p class="burn-status">All figures in ZAR. A = Actual, B = Budget. Click any account cell to edit it — heading and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
     ${notesHtml}
   `;
