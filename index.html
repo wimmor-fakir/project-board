@@ -791,8 +791,11 @@
   .burn-table tr.burn-section-row .burn-section-toggle:hover{ color:var(--accent); }
   .burn-table tr.burn-total-row td{ font-weight:700; background:var(--accent-soft); }
   .burn-table tr.burn-grand-row td{ font-weight:700; border-bottom:2px solid var(--ink-2); background:var(--accent-soft); }
-  .burn-table tr.burn-revenue-row td{ font-weight:700; background:var(--success-soft); color:var(--success); text-align:center; }
-  .burn-table tr.burn-revenue-row td.burn-account-cell{ text-align:left; }
+  .burn-table tr.burn-revenue-row td{ font-weight:700; background:var(--success-soft); color:var(--success); }
+  .burn-table tr.burn-net-row td{ font-weight:700; background:var(--surface-sunken); border-bottom:1px solid var(--border-strong); }
+  .burn-table tr.burn-net-row td.burn-negative{ color:var(--danger); }
+  .burn-table tr.burn-net-row td.burn-positive{ color:var(--success); }
+  .burn-table tr.burn-net-row:hover td{ background:var(--surface-sunken); }
   .burn-table tr.burn-total-row:hover td, .burn-table tr.burn-grand-row:hover td{ background:var(--accent-soft); }
   .burn-table tr.burn-revenue-row:hover td{ background:var(--success-soft); }
   .burn-notes{ margin-top:18px; font-size:12px; color:var(--ink-2); max-width:1000px; }
@@ -5291,17 +5294,25 @@ function renderBurnForecastContent(){
   const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
-  // One revenue figure per month (spanning that month's A and B columns).
-  const revenueCells = [];
-  cols.forEach((c, i) => {
-    if (!monthStart[i]) return;
-    let span = 1;
-    while (i + span < cols.length && cols[i + span].month === c.month) span++;
-    const key = burnMonthKey(c.month);
-    const text = !burnRevenueAvailable ? "—" : key && FORECAST_MONTHS.includes(key) ? formatZar(totalForecastRevenue(key)) : "—";
-    revenueCells.push(`<td colspan="${span}" class="forecast-month-divider">${text}</td>`);
-  });
-  let body = `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Forecasting page</span></td>${revenueCells.join("")}</tr>`;
+  // A month's revenue forecast repeats in each of its columns (A and B), so
+  // every column gets its own burn figure against that column's expenses.
+  const revenueFor = (i) => {
+    const key = burnMonthKey(cols[i].month);
+    return burnRevenueAvailable && key && FORECAST_MONTHS.includes(key) ? totalForecastRevenue(key) : null;
+  };
+  const dividerClass = (i) => (monthStart[i] ? " forecast-month-divider" : "");
+  const burnCells = cols.map((c, i) => {
+    const revenue = revenueFor(i);
+    if (revenue === null) return `<td class="burn-${kindClass(c)}${dividerClass(i)}">—</td>`;
+    const net = revenue - burnGrandTotal(p, i);
+    return `<td class="burn-${kindClass(c)}${dividerClass(i)} ${net < 0 ? "burn-negative" : "burn-positive"}">${formatZar(net)}</td>`;
+  }).join("");
+  const revenueCells = cols.map((c, i) => {
+    const revenue = revenueFor(i);
+    return `<td class="burn-${kindClass(c)}${dividerClass(i)}">${revenue === null ? "—" : formatZar(revenue)}</td>`;
+  }).join("");
+  let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue forecast minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue forecast − total expenses</span></td>${burnCells}</tr>`;
+  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Forecasting page</span></td>${revenueCells}</tr>`;
   body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
