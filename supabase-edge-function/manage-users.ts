@@ -15,7 +15,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const ADMIN_EMAIL = "wim@hawktivity.com";
 
 // Keep in sync with PAGE_ACCESS_PAGES in index.html.
-const VALID_PAGES = ["settings", "activity", "simcards", "teamupdate", "forecasting", "goals", "leave", "mytasks"];
+const VALID_PAGES = ["settings", "activity", "simcards", "teamupdate", "forecasting", "goals", "leave", "mytasks", "burnforecast"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,7 +87,13 @@ Deno.serve(async (req) => {
       const currentMetadata = targetUser.user.user_metadata || {};
       const currentAccess = currentMetadata.page_access || {};
       const newMetadata = { ...currentMetadata, page_access: { ...currentAccess, [page]: allow } };
-      const { error } = await adminClient.auth.admin.updateUserById(targetUserId, { user_metadata: newMetadata });
+      // Mirrored into app_metadata, which (unlike user_metadata) a user can't
+      // edit on their own account — database rules that must actually be
+      // enforced (e.g. burn_forecast's RLS) read page access from there.
+      const currentAppMetadata = targetUser.user.app_metadata || {};
+      const currentAppAccess = currentAppMetadata.page_access || {};
+      const newAppMetadata = { ...currentAppMetadata, page_access: { ...currentAppAccess, [page]: allow } };
+      const { error } = await adminClient.auth.admin.updateUserById(targetUserId, { user_metadata: newMetadata, app_metadata: newAppMetadata });
       if (error) throw error;
       return jsonResponse({ success: true });
     }
