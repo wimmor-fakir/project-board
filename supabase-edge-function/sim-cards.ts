@@ -193,15 +193,18 @@ Deno.serve(async (req) => {
     const historyStartDate = rollingStartDate > EARLIEST_HISTORY_DATE ? rollingStartDate : EARLIEST_HISTORY_DATE;
     const { data: historyRows } = await adminClient
       .from("sim_daily_balances")
-      .select("msisdn, date, balance_mb")
+      .select("msisdn, date, balance_mb, recorded_by")
       .gte("date", historyStartDate)
       .lte("date", today)
       .order("date", { ascending: false });
-    const balanceHistoryByMsisdn: Record<string, { date: string; balance_mb: number }[]> = {};
-    (historyRows || []).forEach((row: { msisdn: string; date: string; balance_mb: number }) => {
+    const balanceHistoryByMsisdn: Record<string, { date: string; balance_mb: number; estimated?: boolean }[]> = {};
+    (historyRows || []).forEach((row: { msisdn: string; date: string; balance_mb: number; recorded_by: string | null }) => {
       const key = normalizeMsisdn(row.msisdn);
       if (!balanceHistoryByMsisdn[key]) balanceHistoryByMsisdn[key] = [];
-      balanceHistoryByMsisdn[key].push({ date: row.date, balance_mb: Number(row.balance_mb) });
+      // Hand-filled gaps are saved with recorded_by starting "ESTIMATE" so the
+      // page can mark them as such rather than as a real reading.
+      const estimated = /^ESTIMATE/i.test(row.recorded_by || "");
+      balanceHistoryByMsisdn[key].push({ date: row.date, balance_mb: Number(row.balance_mb), ...(estimated ? { estimated } : {}) });
     });
     // A recharge shows up as the balance being higher than the reading
     // before it (balance otherwise only ever goes down, from usage). Walks
