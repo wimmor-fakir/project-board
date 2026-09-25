@@ -779,7 +779,10 @@
   .burn-table thead th.burn-kind-budget{ color:var(--ink-3); font-weight:500; }
   .burn-table thead th.burn-kind-actual{ color:var(--ink); }
   .burn-table td.burn-budget{ color:var(--ink-2); }
-  .burn-table tr.burn-section-row td{ background:var(--surface-sunken); }
+  .burn-table tr.burn-section-row td{ background:var(--surface-sunken); font-weight:600; color:var(--ink-2); }
+  .burn-table td.burn-editable{ cursor:pointer; }
+  .burn-table td.burn-editable:hover{ background:var(--accent-soft); }
+  .burn-table td.burn-editable:hover .forecast-cell-editable{ color:var(--accent); text-decoration:underline; }
   .burn-table tr.burn-section-row .burn-section-toggle{
     appearance:none; border:none; background:none; font:inherit; cursor:pointer; padding:0;
     font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-2);
@@ -5250,12 +5253,17 @@ function renderBurnForecastContent(){
     while (i + span < cols.length && cols[i + span].month === c.month) span++;
     monthHeads.push(`<th colspan="${span}" class="forecast-month-divider">${escapeHtmlText(c.month)}</th>`);
   });
-  const kindHeads = cols.map((c, i) => `<th class="burn-kind-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}">${escapeHtmlText(c.kind)}</th>`).join("");
+  const kindHeads = cols.map((c, i) => `<th class="burn-kind-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}" title="${escapeHtmlText(c.kind)}">${escapeHtmlText(String(c.kind).charAt(0).toUpperCase())}</th>`).join("");
+  // The whole cell is the click target, not just the figure — an empty cell
+  // is only a "-", far too small to hit reliably.
   const numCells = (fn, editable) => cols.map((c, i) => {
     const v = fn(i);
-    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}`;
-    return `<td class="${cls}">${editable ? `<span class="forecast-cell-editable" data-burn-cell="${editable}:${i}" title="Click to edit">${formatZar(v)}</span>` : formatZar(v)}</td>`;
+    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${editable ? " burn-editable" : ""}`;
+    return editable
+      ? `<td class="${cls}" data-burn-cell="${editable}:${i}" title="Click to edit ${escapeHtmlText(c.month)} ${escapeHtmlText(c.kind)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
+      : `<td class="${cls}">${formatZar(v)}</td>`;
   }).join("");
+  const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
   let body = "";
@@ -5266,7 +5274,7 @@ function renderBurnForecastContent(){
     const titleHtml = titleParts
       ? `${escapeHtmlText(titleParts[1])}<span class="burn-section-detail">${escapeHtmlText(titleParts[2])}</span>`
       : escapeHtmlText(s.title);
-    body += `<tr class="burn-section-row"><td class="forecast-project-cell burn-account-cell"><button type="button" class="burn-section-toggle" data-burn-toggle-section="${si}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span>${titleHtml}</span></button></td>${cols.map((c, i) => `<td class="${monthStart[i] ? "forecast-month-divider" : ""}"></td>`).join("")}</tr>`;
+    body += `<tr class="burn-section-row"><td class="forecast-project-cell burn-account-cell"><button type="button" class="burn-section-toggle" data-burn-toggle-section="${si}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span>${titleHtml}</span></button></td>${numCells(i => sectionSum(s, i))}</tr>`;
     if (!collapsed){
       s.accounts.forEach((a, ai) => {
         body += `<tr><td class="forecast-project-cell burn-account-cell burn-account-name">${escapeHtmlText(a.name)}</td>${numCells(i => a.values[i], `${si}:${ai}`)}</tr>`;
@@ -5286,6 +5294,8 @@ function renderBurnForecastContent(){
       ${p.sourceNote ? `<p class="burn-source">${escapeHtmlText(p.sourceNote)}</p>` : ""}
     </div>` : "";
 
+  const prevScroll = document.getElementById("burnTableScroll");
+  const prevScrollLeft = prevScroll ? prevScroll.scrollLeft : 0;
   burnForecastPanel.innerHTML = `
     <div class="summary-intro">
       <p>${escapeHtmlText(p.title || "Burn Forecasting")}</p>
@@ -5293,7 +5303,8 @@ function renderBurnForecastContent(){
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
     <div class="forecast-table-card">
-      <div class="forecast-table-scroll" style="max-height:none;">
+      <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
+      <div class="forecast-table-scroll" id="burnTableScroll" style="max-height:none;">
         <table class="forecast-table burn-table">
           <thead>
             <tr><th rowspan="2" class="forecast-project-cell burn-account-cell">Account</th>${monthHeads.join("")}</tr>
@@ -5303,12 +5314,28 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Click any account figure to edit it — subtotals and totals recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+      <p class="burn-status">All figures in ZAR. A = Actual, B = Budget. Click any account cell to edit it — heading, subtotal and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
     ${notesHtml}
   `;
   document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
+
+  const tableScroll = document.getElementById("burnTableScroll");
+  const topScrollbar = document.getElementById("burnTopScrollbar");
+  syncBurnTopScrollbarWidth();
+  // The table widens once its monospace font finishes loading; keep the top bar matched.
+  if (window.ResizeObserver) new ResizeObserver(syncBurnTopScrollbarWidth).observe(tableScroll.querySelector("table"));
+  tableScroll.scrollLeft = prevScrollLeft;
+  topScrollbar.scrollLeft = prevScrollLeft;
+  topScrollbar.addEventListener("scroll", () => { if (tableScroll.scrollLeft !== topScrollbar.scrollLeft) tableScroll.scrollLeft = topScrollbar.scrollLeft; });
+  tableScroll.addEventListener("scroll", () => { if (topScrollbar.scrollLeft !== tableScroll.scrollLeft) topScrollbar.scrollLeft = tableScroll.scrollLeft; });
 }
+function syncBurnTopScrollbarWidth(){
+  const tableScroll = document.getElementById("burnTableScroll");
+  const inner = document.getElementById("burnTopScrollbarInner");
+  if (tableScroll && inner) inner.style.width = tableScroll.scrollWidth + "px";
+}
+window.addEventListener("resize", syncBurnTopScrollbarWidth);
 
 async function saveBurnForecastCell(si, ai, ci, value){
   const account = burnForecast.sections[si].accounts[ai];
@@ -5331,15 +5358,16 @@ async function saveBurnForecastCell(si, ai, ci, value){
   }
   if (currentId === "burnforecast") renderBurnForecastContent();
 }
-function openBurnCellEditor(el){
-  const [si, ai, ci] = el.dataset.burnCell.split(":").map(Number);
+function openBurnCellEditor(cell){
+  const [si, ai, ci] = cell.dataset.burnCell.split(":").map(Number);
   const current = burnForecast.sections[si].accounts[ai].values[ci];
   const input = document.createElement("input");
   input.type = "text";
   input.inputMode = "decimal";
   input.className = "inline-date-input forecast-cell-input";
   input.value = current === null || current === undefined ? "" : String(current);
-  el.replaceWith(input);
+  cell.innerHTML = "";
+  cell.appendChild(input);
   input.focus();
   input.select();
   let settled = false;
@@ -5347,7 +5375,10 @@ function openBurnCellEditor(el){
     if (settled) return;
     settled = true;
     const value = parseZarInput(input.value);
-    if (save && value !== undefined && value !== (current === undefined ? null : current)) saveBurnForecastCell(si, ai, ci, value);
+    if (save && value === undefined){
+      burnForecastSaveError = `Couldn't read "${input.value}" as an amount — type digits only, e.g. 90000, 90,000 or (1,500) for a negative. Nothing was changed.`;
+      renderBurnForecastContent();
+    } else if (save && value !== (current === undefined ? null : current)) saveBurnForecastCell(si, ai, ci, value);
     else renderBurnForecastContent();
   };
   input.addEventListener("blur", () => finish(true));
@@ -5365,6 +5396,7 @@ burnForecastPanel.addEventListener("click", (e) => {
     renderBurnForecastContent();
     return;
   }
+  if (e.target.closest(".forecast-cell-input")) return; // already editing this cell
   const cell = e.target.closest("[data-burn-cell]");
   if (cell) openBurnCellEditor(cell);
 });
