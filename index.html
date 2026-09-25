@@ -760,6 +760,40 @@
     transform:rotate(45deg) translate(-1px, -2px);
   }
 
+  .tab-dot.burn-dot{
+    background:var(--ink-3); width:9px; height:11px;
+    clip-path: polygon(50% 0, 88% 50%, 80% 88%, 50% 100%, 20% 88%, 12% 50%, 35% 58%);
+  }
+
+  /* ---------- Burn Forecasting panel ---------- */
+  .burn-subtitle{ font-size:12px; color:var(--ink-3); margin:-6px 0 14px; max-width:900px; }
+  .burn-status{ font-size:11.5px; color:var(--ink-3); margin:10px 0 0; }
+  .burn-table td{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; }
+  .burn-table td.forecast-project-cell{ font-family:inherit; font-size:12.5px; }
+  .burn-table .burn-account-cell, .burn-table th.burn-account-cell{ min-width:210px; max-width:320px; white-space:normal; text-align:left; }
+  .burn-section-detail{
+    display:block; margin-top:2px; font-size:10.5px; font-weight:400; text-transform:none;
+    letter-spacing:0; color:var(--ink-3);
+  }
+  .burn-table .burn-account-name{ font-weight:400; padding-left:26px; }
+  .burn-table thead th.burn-kind-budget{ color:var(--ink-3); font-weight:500; }
+  .burn-table thead th.burn-kind-actual{ color:var(--ink); }
+  .burn-table td.burn-budget{ color:var(--ink-2); }
+  .burn-table tr.burn-section-row td{ background:var(--surface-sunken); }
+  .burn-table tr.burn-section-row .burn-section-toggle{
+    appearance:none; border:none; background:none; font:inherit; cursor:pointer; padding:0;
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-2);
+    text-align:left; white-space:normal; display:flex; gap:6px; align-items:flex-start;
+  }
+  .burn-table tr.burn-section-row .burn-section-toggle:hover{ color:var(--accent); }
+  .burn-table tr.burn-subtotal-row td{ font-weight:700; border-top:1px solid var(--border-strong); }
+  .burn-table tr.burn-total-row td{ font-weight:700; background:var(--accent-soft); }
+  .burn-table tr.burn-grand-row td{ font-weight:700; border-top:2px solid var(--ink-2); background:var(--accent-soft); }
+  .burn-table tr.burn-total-row:hover td, .burn-table tr.burn-grand-row:hover td{ background:var(--accent-soft); }
+  .burn-notes{ margin-top:18px; font-size:12px; color:var(--ink-2); max-width:1000px; }
+  .burn-notes ol{ margin:8px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:5px; }
+  .burn-notes .burn-source{ margin-top:10px; color:var(--ink-3); }
+
   /* ---------- My Tasks panel ---------- */
   .mytasks-section{ margin-bottom:26px; }
   .mytasks-section-head{
@@ -1963,6 +1997,7 @@ const PAGE_ACCESS_PAGES = [
   { key: "goals", label: "Goals" },
   { key: "leave", label: "Leave" },
   { key: "mytasks", label: "My Tasks" },
+  { key: "burnforecast", label: "Burn Forecasting" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2102,6 +2137,7 @@ function revealApp(){
 }
 function showAuthGate(){
   clearMyTasksState();
+  clearBurnForecastState();
   document.querySelector(".app").hidden = true;
   document.getElementById("authGateBackdrop").hidden = false;
   document.getElementById("signOutBtn").hidden = true;
@@ -2583,6 +2619,24 @@ function renderRail(){
     `;
     forecastingTab.addEventListener("click", () => selectProject("forecasting"));
     rail.appendChild(forecastingTab);
+  }
+
+  if (hasPageAccess("burnforecast")){
+    const burnTab = document.createElement("button");
+    burnTab.className = "tab";
+    burnTab.role = "tab";
+    burnTab.id = "tab-burnforecast";
+    burnTab.dataset.id = "burnforecast";
+    burnTab.setAttribute("aria-controls", "panel-burnforecast");
+    burnTab.innerHTML = `
+      <span class="tab-dot burn-dot"></span>
+      <span class="tab-body">
+        <div class="tab-name">Burn Forecasting</div>
+        <div class="tab-meta">Expenses: budget vs actual</div>
+      </span>
+    `;
+    burnTab.addEventListener("click", () => selectProject("burnforecast"));
+    rail.appendChild(burnTab);
   }
 
   if (hasPageAccess("goals")){
@@ -3113,6 +3167,13 @@ myTasksPanel.id = "panel-mytasks";
 myTasksPanel.role = "tabpanel";
 myTasksPanel.setAttribute("aria-labelledby", "tab-mytasks");
 panelsEl.appendChild(myTasksPanel);
+
+const burnForecastPanel = document.createElement("section");
+burnForecastPanel.className = "panel";
+burnForecastPanel.id = "panel-burnforecast";
+burnForecastPanel.role = "tabpanel";
+burnForecastPanel.setAttribute("aria-labelledby", "tab-burnforecast");
+panelsEl.appendChild(burnForecastPanel);
 
 /* ---------- Settings panel: manage project & action statuses ---------- */
 let settingsRenamingHealth = null;
@@ -5102,6 +5163,212 @@ myTasksPanel.addEventListener("change", (e) => {
   if (check) updatePersonalTask(check.dataset.togglePrivateTask, { done: check.checked, done_at: check.checked ? new Date().toISOString() : null });
 });
 
+/* ---------- Burn Forecasting ---------- */
+// The sheet lives only in the burn_forecast table (one JSON document, id
+// 'main') behind RLS that checks app_metadata page access — never in this
+// file, since the repo and the page source are public. Subtotal and total
+// rows aren't stored; they're summed from the account rows on render.
+let burnForecast = null;
+let burnForecastMeta = null;
+let burnForecastLoadedFor = null;
+let burnForecastSaveError = null;
+const burnCollapsedSections = new Set();
+
+function clearBurnForecastState(){
+  burnForecast = null;
+  burnForecastMeta = null;
+  burnForecastLoadedFor = null;
+  burnForecastSaveError = null;
+  burnForecastPanel.innerHTML = "";
+}
+function formatZar(n){
+  if (n === null || n === undefined || Math.round(n) === 0) return "-";
+  const s = Math.round(Math.abs(n)).toLocaleString("en-US");
+  return n < 0 ? `(${s})` : s;
+}
+// "" / "-" clears the cell; "(1,234)" or "-1234" is negative; returns
+// undefined for anything that isn't a number.
+function parseZarInput(raw){
+  const t = String(raw).trim().replace(/[\s,]/g, "").replace(/^R/i, "");
+  if (t === "" || t === "-") return null;
+  const neg = /^\(.*\)$/.test(t) || t.startsWith("-");
+  const v = Number(t.replace(/[()]/g, "").replace(/^-/, ""));
+  if (!isFinite(v)) return undefined;
+  return neg ? -v : v;
+}
+function burnSectionSubtotal(section, col){
+  return section.accounts.filter(a => !a.excludeFromSubtotal).reduce((sum, a) => sum + (a.values[col] || 0), 0);
+}
+function burnOpexTotal(p, col){
+  return p.sections.filter(s => s.inOpex).reduce((sum, s) => sum + burnSectionSubtotal(s, col), 0);
+}
+// Opex + every account outside Opex (Cost of Sales, Depreciation, net Interest).
+function burnGrandTotal(p, col){
+  return burnOpexTotal(p, col) + p.sections.filter(s => !s.inOpex)
+    .reduce((sum, s) => sum + s.accounts.reduce((acc, a) => acc + (a.values[col] || 0), 0), 0);
+}
+
+async function renderBurnForecast(){
+  if (!hasPageAccess("burnforecast")) return;
+  if (!supabaseClient || !authSession){
+    burnForecastPanel.innerHTML = `<p class="summary-facts">Sign in to see Burn Forecasting.</p>`;
+    return;
+  }
+  const userId = authSession.user.id;
+  burnForecastPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
+  const { data, error } = await supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle();
+  if (!authSession || authSession.user.id !== userId) return;
+  if (error){
+    if (currentId === "burnforecast") burnForecastPanel.innerHTML = `<p class="summary-facts">Couldn't load Burn Forecasting — has supabase-burn-forecast.sql been run yet? (${escapeHtmlText(error.message)})</p>`;
+    return;
+  }
+  burnForecast = data ? data.payload : null;
+  burnForecastMeta = data ? { updated_by: data.updated_by, updated_at: data.updated_at } : null;
+  burnForecastLoadedFor = userId;
+  if (currentId === "burnforecast") renderBurnForecastContent();
+}
+
+function renderBurnForecastContent(){
+  const p = burnForecast;
+  if (!p){
+    burnForecastPanel.innerHTML = `
+      <div class="summary-intro">
+        <p>Nothing to show yet. Either the figures haven't been loaded into the database, or the database hasn't granted your account access — ${escapeHtmlText(ADMIN_EMAIL)} ticks "Burn Forecasting" for you under Settings → User management, then sign out and back in.</p>
+        <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
+      </div>`;
+    document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
+    return;
+  }
+  const cols = p.columns;
+  const kindClass = (c) => (String(c.kind).toLowerCase() === "actual" ? "actual" : "budget");
+  const monthStart = cols.map((c, i) => i === 0 || cols[i - 1].month !== c.month);
+
+  const monthHeads = [];
+  cols.forEach((c, i) => {
+    if (!monthStart[i]) return;
+    let span = 1;
+    while (i + span < cols.length && cols[i + span].month === c.month) span++;
+    monthHeads.push(`<th colspan="${span}" class="forecast-month-divider">${escapeHtmlText(c.month)}</th>`);
+  });
+  const kindHeads = cols.map((c, i) => `<th class="burn-kind-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}">${escapeHtmlText(c.kind)}</th>`).join("");
+  const numCells = (fn, editable) => cols.map((c, i) => {
+    const v = fn(i);
+    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}`;
+    return `<td class="${cls}">${editable ? `<span class="forecast-cell-editable" data-burn-cell="${editable}:${i}" title="Click to edit">${formatZar(v)}</span>` : formatZar(v)}</td>`;
+  }).join("");
+
+  const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
+  let body = "";
+  p.sections.forEach((s, si) => {
+    const collapsed = burnCollapsedSections.has(si);
+    // A trailing "(…)" in the sheet's heading is an explanatory aside — shown small, under the name.
+    const titleParts = String(s.title).match(/^(.*?)\s*\((.*)\)$/);
+    const titleHtml = titleParts
+      ? `${escapeHtmlText(titleParts[1])}<span class="burn-section-detail">${escapeHtmlText(titleParts[2])}</span>`
+      : escapeHtmlText(s.title);
+    body += `<tr class="burn-section-row"><td class="forecast-project-cell burn-account-cell"><button type="button" class="burn-section-toggle" data-burn-toggle-section="${si}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span>${titleHtml}</span></button></td>${cols.map((c, i) => `<td class="${monthStart[i] ? "forecast-month-divider" : ""}"></td>`).join("")}</tr>`;
+    if (!collapsed){
+      s.accounts.forEach((a, ai) => {
+        body += `<tr><td class="forecast-project-cell burn-account-cell burn-account-name">${escapeHtmlText(a.name)}</td>${numCells(i => a.values[i], `${si}:${ai}`)}</tr>`;
+      });
+    }
+    body += `<tr class="burn-subtotal-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(s.subtotal)}</td>${numCells(i => burnSectionSubtotal(s, i))}</tr>`;
+    if (si === lastOpexIndex){
+      body += `<tr class="burn-total-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.opexTotalLabel || "Total Operating Expenses")}</td>${numCells(i => burnOpexTotal(p, i))}</tr>`;
+    }
+  });
+  body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
+
+  const notesHtml = (p.notes && p.notes.length) || p.sourceNote ? `
+    <div class="burn-notes">
+      <div class="settings-section-title">Notes</div>
+      ${p.notes && p.notes.length ? `<ol start="0">${p.notes.map(n => `<li>${escapeHtmlText(String(n).replace(/^\d+\.\s*/, ""))}</li>`).join("")}</ol>` : ""}
+      ${p.sourceNote ? `<p class="burn-source">${escapeHtmlText(p.sourceNote)}</p>` : ""}
+    </div>` : "";
+
+  burnForecastPanel.innerHTML = `
+    <div class="summary-intro">
+      <p>${escapeHtmlText(p.title || "Burn Forecasting")}</p>
+      <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
+    </div>
+    ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
+    <div class="forecast-table-card">
+      <div class="forecast-table-scroll" style="max-height:none;">
+        <table class="forecast-table burn-table">
+          <thead>
+            <tr><th rowspan="2" class="forecast-project-cell burn-account-cell">Account</th>${monthHeads.join("")}</tr>
+            <tr>${kindHeads}</tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
+      <p class="burn-status">All figures in ZAR. Click any account figure to edit it — subtotals and totals recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+    </div>
+    ${notesHtml}
+  `;
+  document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
+}
+
+async function saveBurnForecastCell(si, ai, ci, value){
+  const account = burnForecast.sections[si].accounts[ai];
+  const before = account.values[ci];
+  account.values[ci] = value;
+  burnForecastSaveError = null;
+  renderBurnForecastContent();
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabaseClient.from("burn_forecast").upsert({
+    id: "main",
+    payload: burnForecast,
+    updated_by: authSession.user.email,
+    updated_at: updatedAt,
+  }, { onConflict: "id" });
+  if (error){
+    account.values[ci] = before;
+    burnForecastSaveError = "Couldn't save that change: " + error.message;
+  } else {
+    burnForecastMeta = { updated_by: authSession.user.email, updated_at: updatedAt };
+  }
+  if (currentId === "burnforecast") renderBurnForecastContent();
+}
+function openBurnCellEditor(el){
+  const [si, ai, ci] = el.dataset.burnCell.split(":").map(Number);
+  const current = burnForecast.sections[si].accounts[ai].values[ci];
+  const input = document.createElement("input");
+  input.type = "text";
+  input.inputMode = "decimal";
+  input.className = "inline-date-input forecast-cell-input";
+  input.value = current === null || current === undefined ? "" : String(current);
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const finish = (save) => {
+    if (settled) return;
+    settled = true;
+    const value = parseZarInput(input.value);
+    if (save && value !== undefined && value !== (current === undefined ? null : current)) saveBurnForecastCell(si, ai, ci, value);
+    else renderBurnForecastContent();
+  };
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+}
+burnForecastPanel.addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-burn-toggle-section]");
+  if (toggle){
+    const si = Number(toggle.dataset.burnToggleSection);
+    if (burnCollapsedSections.has(si)) burnCollapsedSections.delete(si); else burnCollapsedSections.add(si);
+    renderBurnForecastContent();
+    return;
+  }
+  const cell = e.target.closest("[data-burn-cell]");
+  if (cell) openBurnCellEditor(cell);
+});
+
 function renderSettings(){
   if (!hasPageAccess("settings")) return;
   const healthRows = HEALTH_OPTIONS.map(opt => buildSettingsStatusRow(
@@ -5655,7 +5922,7 @@ function buildProjectPanel(p){
 
 function renderProjectPanels(){
   panelsEl.querySelectorAll(".panel").forEach(panel => {
-    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals" && panel.id !== "panel-leave" && panel.id !== "panel-mytasks") panel.remove();
+    if (panel.id !== "panel-summary" && panel.id !== "panel-people" && panel.id !== "panel-settings" && panel.id !== "panel-activity" && panel.id !== "panel-simcards" && panel.id !== "panel-teamupdate" && panel.id !== "panel-forecasting" && panel.id !== "panel-goals" && panel.id !== "panel-leave" && panel.id !== "panel-mytasks" && panel.id !== "panel-burnforecast") panel.remove();
   });
   PROJECTS.forEach(p => panelsEl.appendChild(buildProjectPanel(p)));
 }
@@ -5706,6 +5973,7 @@ function selectProject(id){
   const enteringGoals = entering("goals");
   const enteringLeave = entering("leave");
   const enteringMyTasks = entering("mytasks");
+  const enteringBurnForecast = entering("burnforecast");
   currentId = id;
   try { localStorage.setItem(TAB_STORAGE_KEY, id); } catch (err) {}
   updateRailSelection();
@@ -5754,6 +6022,11 @@ function selectProject(id){
     const loadedForSomeoneElse = !authSession || myTasksLoadedFor !== authSession.user.id;
     if (enteringMyTasks || loadedForSomeoneElse) renderMyTasks();
     else renderMyAssignedTasks();
+  } else if (id === "burnforecast"){
+    mainTitleEl.textContent = "Burn Forecasting";
+    document.getElementById("crumb").textContent = "Overview";
+    const burnLoadedForSomeoneElse = !authSession || burnForecastLoadedFor !== authSession.user.id;
+    if (enteringBurnForecast || burnLoadedForSomeoneElse) renderBurnForecast();
   } else {
     const proj = PROJECTS.find(p => p.id === id);
     const health = healthOption(proj.health);
