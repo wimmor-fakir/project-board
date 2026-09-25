@@ -417,6 +417,16 @@ where the browser never sees it.
    keeps working even through a quiet week. See the comments in that file
    for how to check it's actually firing, or stop it.
 
+   **Then turn off "Verify JWT"** for the `sim-cards` function (Edge
+   Functions → `sim-cards` → Details → "Verify JWT" / "Enforce JWT
+   verification" → off → Save). The scheduled call has no signed-in user,
+   so with this left on Supabase rejects it before the function runs
+   (`401 UNAUTHORIZED_NO_AUTH_HEADER`) and days nobody opens the page are
+   silently skipped. It's safe to turn off: the function does its own
+   check, letting in only a signed-in user with SIM Cards access or a call
+   carrying the right `CRON_SECRET`. (Deploying with the CLI instead?
+   Use `supabase functions deploy sim-cards --no-verify-jwt`.)
+
 **Never paste the SIMcontrol API key, or the filled-in
 `supabase-sim-cards-daily-cron.sql` with your real `CRON_SECRET` in it,
 into `index.html`, a commit, or anywhere else that ends up in the GitHub

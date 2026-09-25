@@ -1176,6 +1176,15 @@
   .simcard-balance-chart-slot:hover, .simcard-balance-chart-slot:focus-visible{ background:var(--accent-soft); }
   .simcard-balance-chart-bar{ width:100%; max-width:28px; background:var(--chart-1); border-radius:4px 4px 0 0; }
   .simcard-balance-chart-slot.is-zero .simcard-balance-chart-bar{ min-height:2px; border-radius:0; }
+  .simcard-balance-chart-slot.is-estimate .simcard-balance-chart-bar,
+  .simcard-balance-chart-note-swatch{
+    background:repeating-linear-gradient(135deg, var(--chart-1) 0 3px, color-mix(in srgb, var(--chart-1) 35%, var(--surface)) 3px 6px);
+  }
+  .simcard-balance-chart-note{
+    display:flex; align-items:center; gap:6px; margin-top:8px;
+    font-size:11px; color:var(--ink-3);
+  }
+  .simcard-balance-chart-note-swatch{ width:10px; height:10px; border-radius:2px; flex:none; }
   .simcard-balance-chart-xlabels{ display:flex; margin-top:6px; height:14px; }
   .simcard-balance-chart-xlabels span{
     flex:1 1 0; min-width:0; display:flex; justify-content:center;
@@ -3382,6 +3391,7 @@ function buildSimCardBalanceHistoryRow(sim){
 }
 function buildSimBalanceChartHtml(history){
   const byDate = new Map(history.map(h => [h.date, Number(h.balance_mb)]));
+  const estimatedDates = new Set(history.filter(h => h.estimated).map(h => h.date));
   const sortedDates = [...byDate.keys()].sort();
   // One slot per calendar day, so a day with no reading shows as a gap
   // rather than being silently squeezed out of the x axis.
@@ -3405,8 +3415,9 @@ function buildSimBalanceChartHtml(history){
     const has = byDate.has(d);
     const value = byDate.get(d);
     const pct = has && value > 0 ? Math.max((value / axisMaxMb) * 100, 1) : 0;
-    const valueText = has ? formatDataMb(value) : "No reading";
-    const stateClass = !has ? " is-missing" : value > 0 ? "" : " is-zero";
+    const isEstimate = has && estimatedDates.has(d);
+    const valueText = has ? formatDataMb(value) + (isEstimate ? " (estimate)" : "") : "No reading";
+    const stateClass = (!has ? " is-missing" : value > 0 ? "" : " is-zero") + (isEstimate ? " is-estimate" : "");
     return `<div class="simcard-balance-chart-slot${stateClass}" tabindex="0" data-date="${formatDateWithYear(d)}" data-value="${valueText}" aria-label="${formatDateWithYear(d)}: ${valueText}"><div class="simcard-balance-chart-bar" style="height:${pct}%"></div></div>`;
   }).join("");
   const labelStride = Math.max(1, Math.ceil(days.length / 10));
@@ -3419,6 +3430,7 @@ function buildSimBalanceChartHtml(history){
         <div class="simcard-balance-chart-bars">${slots}</div>
       </div>
       <div class="simcard-balance-chart-xlabels">${xLabels}</div>
+      ${estimatedDates.size ? `<div class="simcard-balance-chart-note"><span class="simcard-balance-chart-note-swatch"></span>Striped bars are estimates — no reading was taken that day.</div>` : ""}
       <div class="simcard-balance-chart-tooltip" hidden></div>
     </div>
   `;

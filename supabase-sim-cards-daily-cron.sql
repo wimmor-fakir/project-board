@@ -3,6 +3,11 @@
 --   2. the sim-cards Edge Function has been (re)deployed with a CRON_SECRET
 --      secret set (Edge Functions -> sim-cards -> Secrets). Use any random
 --      string for it -- a password generator's output is fine.
+--   3. "Verify JWT" has been turned OFF for the sim-cards function
+--      (Edge Functions -> sim-cards -> Details). This call carries no
+--      signed-in user, so with it on, Supabase rejects every scheduled run
+--      with 401 UNAUTHORIZED_NO_AUTH_HEADER before the function even runs.
+--      The function checks CRON_SECRET / the user's access itself.
 --
 -- Schedules a daily call to the sim-cards function so it records that
 -- day's balance for every SIM even if nobody opens the SIM Cards page --
@@ -45,11 +50,14 @@ select cron.schedule(
 -- To check it's registered:
 --   select * from cron.job where jobname = 'sim-cards-daily-balance-snapshot';
 --
--- To see whether it's actually been firing (and whether each run
--- succeeded):
+-- To see whether it's actually been firing:
 --   select * from cron.job_run_details
 --   where jobid = (select jobid from cron.job where jobname = 'sim-cards-daily-balance-snapshot')
 --   order by start_time desc limit 10;
+-- ("succeeded" there only means the call was sent. To see what the
+-- function answered -- kept for about 6 hours -- look for status_code 200:)
+--   select created, status_code, left(content::text, 200)
+--   from net._http_response order by created desc limit 5;
 --
 -- To stop it:
 --   select cron.unschedule('sim-cards-daily-balance-snapshot');
