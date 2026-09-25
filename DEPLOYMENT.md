@@ -93,6 +93,11 @@ when you open the live site** — all one-time, no-code steps:
      function must be redeployed for ticks to take effect). The figures
      themselves are loaded separately, from a private SQL script run
      straight in the SQL Editor — they are never in this repo.
+   - **Then run `supabase-burn-scenarios.sql`** — adds the Burn
+     Forecasting page's named, date-stamped scenarios (a snapshot of the
+     page's expenses together with every Forecasting line and figure) that
+     can be downloaded as a CSV or reinstated. Same access rule as the
+     Burn Forecasting table.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -522,6 +527,7 @@ typed.
 | Already had the Leave page but no Settings → Leave page checkboxes? Run `supabase-migration-leave-show-on-leave.sql` once | Adds the `show_on_leave` column, defaulting everyone to shown |
 | Run `supabase-personal-tasks.sql` too | Creates the tables behind the My Tasks page — private to-do lists that only their owner can read or change |
 | Run `supabase-burn-forecast.sql` too, then the private figures script | Creates the Burn Forecasting table (readable only by the admin and people ticked for it) and loads the figures — the figures script is never committed |
+| Run `supabase-burn-scenarios.sql` too | Adds Burn Forecasting scenarios (save / download / reinstate expenses + Forecasting income together), same access rule |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |

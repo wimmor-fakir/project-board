@@ -798,6 +798,26 @@
   .burn-table tr.burn-net-row:hover td{ background:var(--surface-sunken); }
   .burn-table tr.burn-total-row:hover td, .burn-table tr.burn-grand-row:hover td{ background:var(--accent-soft); }
   .burn-table tr.burn-revenue-row:hover td{ background:var(--success-soft); }
+  .burn-scenarios{ margin-bottom:14px; padding:14px 18px; }
+  .burn-scenarios-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+  .burn-scenarios-head .settings-section-title{ margin-bottom:0; }
+  .burn-scenario-hint{ font-size:11.5px; color:var(--ink-3); }
+  .burn-scenario-form{ margin-bottom:8px; }
+  .burn-scenario-ok{ font-size:12px; color:var(--success); margin:4px 0 8px; }
+  .burn-scenario-empty{ font-size:12px; color:var(--ink-3); font-style:italic; margin:4px 0 0; }
+  .burn-scenario-list{ display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .burn-scenario-row{
+    display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:12px; align-items:center;
+    padding:8px 12px; border-top:1px solid var(--border);
+  }
+  .burn-scenario-row:first-child{ border-top:none; }
+  .burn-scenario-name{ font-size:13px; font-weight:600; min-width:0; overflow-wrap:anywhere; }
+  .burn-scenario-meta{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+  .burn-scenario-actions{ display:flex; gap:6px; }
+  @media (max-width: 700px){
+    .burn-scenario-row{ grid-template-columns:1fr; gap:4px; }
+    .burn-scenario-meta{ white-space:normal; }
+  }
   .burn-notes{ margin-top:18px; font-size:12px; color:var(--ink-2); max-width:1000px; }
   .burn-notes ol{ margin:8px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:5px; }
   .burn-notes .burn-source{ margin-top:10px; color:var(--ink-3); }
@@ -5192,6 +5212,11 @@ let burnForecastMeta = null;
 let burnForecastLoadedFor = null;
 let burnForecastSaveError = null;
 let burnRevenueAvailable = false;
+let burnScenarios = [];          // [{ id, name, created_at, created_by }], newest first
+let burnScenariosError = null;
+let burnScenarioName = "";
+let burnScenarioMessage = null;  // { text, isError }
+let burnScenarioBusy = false;
 const burnCollapsedSections = new Set();
 const BURN_MONTH_INDEX = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 // "Sep 2026" -> "2026-09-01" (the Forecasting page's month key), or null if unrecognised.
@@ -5206,6 +5231,9 @@ function clearBurnForecastState(){
   burnForecastMeta = null;
   burnForecastLoadedFor = null;
   burnForecastSaveError = null;
+  burnScenarios = [];
+  burnScenariosError = null;
+  burnScenarioMessage = null;
   burnForecastPanel.innerHTML = "";
 }
 function formatZar(n){
@@ -5246,6 +5274,7 @@ async function renderBurnForecast(){
   const [{ data, error }, revenueLoaded] = await Promise.all([
     supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle(),
     loadForecastData(),
+    loadBurnScenarios(),
   ]);
   if (!authSession || authSession.user.id !== userId) return;
   burnRevenueAvailable = revenueLoaded;
@@ -5347,6 +5376,7 @@ function renderBurnForecastContent(){
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
+    ${buildBurnScenariosHtml()}
     <div class="forecast-table-card">
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll" id="burnTableScroll" style="max-height:none;">
@@ -5364,6 +5394,7 @@ function renderBurnForecastContent(){
     ${notesHtml}
   `;
   document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
+  wireBurnScenarioForm();
 
   const tableScroll = document.getElementById("burnTableScroll");
   const topScrollbar = document.getElementById("burnTopScrollbar");
@@ -5381,6 +5412,192 @@ function syncBurnTopScrollbarWidth(){
   if (tableScroll && inner) inner.style.width = tableScroll.scrollWidth + "px";
 }
 window.addEventListener("resize", syncBurnTopScrollbarWidth);
+
+/* ---------- Burn Forecasting scenarios ---------- */
+// A scenario = expenses (this page's sheet) + income (every Forecasting line
+// and its monthly figures), saved and reinstated by the save_/
+// reinstate_burn_scenario database functions (supabase-burn-scenarios.sql).
+async function loadBurnScenarios(){
+  const { data, error } = await supabaseClient.from("burn_scenarios")
+    .select("id, name, created_at, created_by").order("created_at", { ascending: false });
+  burnScenariosError = error ? error.message : null;
+  burnScenarios = error ? [] : (data || []);
+}
+function buildBurnScenariosHtml(){
+  const msg = burnScenarioMessage
+    ? `<p class="${burnScenarioMessage.isError ? "modal-error" : "burn-scenario-ok"}">${escapeHtmlText(burnScenarioMessage.text)}</p>` : "";
+  let list;
+  if (burnScenariosError){
+    list = `<p class="summary-facts">Couldn't load scenarios — has supabase-burn-scenarios.sql been run yet? (${escapeHtmlText(burnScenariosError)})</p>`;
+  } else if (!burnScenarios.length){
+    list = `<p class="burn-scenario-empty">No saved scenarios yet.</p>`;
+  } else {
+    list = `<div class="burn-scenario-list">${burnScenarios.map(s => `
+      <div class="burn-scenario-row">
+        <div class="burn-scenario-name">${escapeHtmlText(s.name)}</div>
+        <div class="burn-scenario-meta">${escapeHtmlText(formatChangeTimestamp(s.created_at))}${s.created_by ? ` · ${escapeHtmlText(s.created_by)}` : ""}</div>
+        <div class="burn-scenario-actions">
+          <button type="button" class="btn btn-new" data-burn-scenario-download="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>⇩ Download</button>
+          <button type="button" class="btn btn-secondary" data-burn-scenario-reinstate="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>↺ Reinstate</button>
+          <button type="button" class="btn btn-text" data-burn-scenario-delete="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>Delete</button>
+        </div>
+      </div>`).join("")}</div>`;
+  }
+  return `
+    <div class="forecast-table-card burn-scenarios">
+      <div class="burn-scenarios-head">
+        <div class="settings-section-title">Scenarios</div>
+        <span class="burn-scenario-hint">Saves this page's expenses together with the income on the Forecasting page, date-stamped.</span>
+      </div>
+      <form class="mytasks-add burn-scenario-form" id="burnScenarioForm" autocomplete="off">
+        <input type="text" id="burnScenarioName" maxlength="120" placeholder="Name this scenario, e.g. Base case Sep 2026" aria-label="Scenario name" value="${escapeHtmlText(burnScenarioName)}" ${burnScenarioBusy ? "disabled" : ""}>
+        <button type="submit" class="btn btn-secondary" ${burnScenarioBusy ? "disabled" : ""}>Save as scenario</button>
+        <button type="button" class="btn btn-new" id="burnDownloadCurrent" ${burnScenarioBusy ? "disabled" : ""}>⇩ Download current</button>
+      </form>
+      ${msg}
+      ${list}
+    </div>`;
+}
+function wireBurnScenarioForm(){
+  const form = document.getElementById("burnScenarioForm");
+  if (!form) return;
+  const nameInput = document.getElementById("burnScenarioName");
+  nameInput.addEventListener("input", () => { burnScenarioName = nameInput.value; });
+  form.addEventListener("submit", (e) => { e.preventDefault(); saveBurnScenario(); });
+  document.getElementById("burnDownloadCurrent").addEventListener("click", () => {
+    downloadBurnScenarioCsv({ name: "Current (not saved)", created_at: new Date().toISOString(), created_by: authSession.user.email, expenses: burnForecast, income: currentForecastIncome() });
+  });
+}
+async function withBurnScenarioBusy(fn){
+  burnScenarioBusy = true;
+  renderBurnForecastContent();
+  try { await fn(); } finally {
+    burnScenarioBusy = false;
+    if (currentId === "burnforecast") renderBurnForecastContent();
+  }
+}
+async function saveBurnScenario(){
+  const name = burnScenarioName.trim();
+  if (!name){ burnScenarioMessage = { text: "Give the scenario a name first.", isError: true }; renderBurnForecastContent(); return; }
+  await withBurnScenarioBusy(async () => {
+    const { error } = await supabaseClient.rpc("save_burn_scenario", { p_name: name });
+    if (error){ burnScenarioMessage = { text: "Couldn't save the scenario: " + error.message, isError: true }; return; }
+    burnScenarioName = "";
+    await loadBurnScenarios();
+    burnScenarioMessage = { text: `Saved "${name}" — ${formatChangeTimestamp(new Date().toISOString())}.`, isError: false };
+  });
+}
+async function reinstateBurnScenario(id){
+  const s = burnScenarios.find(x => x.id === id);
+  if (!s) return;
+  if (!window.confirm(`Reinstate "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})?\n\nThis replaces the expenses on this page AND every line and figure on the Forecasting page, for everyone.\n\nThe current state is saved as a scenario first, so you can undo this.`)) return;
+  await withBurnScenarioBusy(async () => {
+    const { error } = await supabaseClient.rpc("reinstate_burn_scenario", { p_scenario_id: id });
+    if (error){ burnScenarioMessage = { text: "Couldn't reinstate the scenario: " + error.message, isError: true }; return; }
+    burnScenarioMessage = { text: `Reinstated "${s.name}". The previous state was saved as a scenario.`, isError: false };
+  });
+  if (!burnScenarioMessage.isError){
+    const message = burnScenarioMessage;
+    await renderBurnForecast();
+    burnScenarioMessage = message;
+    if (currentId === "burnforecast") renderBurnForecastContent();
+  }
+}
+async function deleteBurnScenario(id){
+  const s = burnScenarios.find(x => x.id === id);
+  if (!s || !window.confirm(`Delete the scenario "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})? This can't be undone.`)) return;
+  await withBurnScenarioBusy(async () => {
+    const { error } = await supabaseClient.from("burn_scenarios").delete().eq("id", id);
+    if (error){ burnScenarioMessage = { text: "Couldn't delete the scenario: " + error.message, isError: true }; return; }
+    await loadBurnScenarios();
+    burnScenarioMessage = { text: `Deleted "${s.name}".`, isError: false };
+  });
+}
+async function downloadBurnScenario(id){
+  const { data, error } = await supabaseClient.from("burn_scenarios").select("*").eq("id", id).maybeSingle();
+  if (error || !data){
+    burnScenarioMessage = { text: "Couldn't download the scenario" + (error ? ": " + error.message : "."), isError: true };
+    renderBurnForecastContent();
+    return;
+  }
+  downloadBurnScenarioCsv(data);
+}
+// The Forecasting data currently in memory, in the same shape a saved scenario uses.
+function currentForecastIncome(){
+  const lines = [];
+  Object.entries(forecastLines).forEach(([projectId, projectLines]) => projectLines.forEach(l => lines.push({ id: l.id, project_id: projectId, label: l.label, sort_order: l.sort_order, included_in_chart: l.included_in_chart })));
+  const forecasts = [];
+  Object.entries(forecastData).forEach(([lineId, months]) => Object.entries(months).forEach(([month, v]) => forecasts.push({ line_id: Number(lineId), month, locations: v.locations, price: v.price })));
+  return { lines, forecasts };
+}
+// Same rule as the live revenue row: lines ticked for the Forecasting chart, on projects that still exist.
+function incomeRevenue(income, monthKey){
+  if (!income || !monthKey) return 0;
+  const counted = new Set((income.lines || [])
+    .filter(l => l.included_in_chart !== false && PROJECTS.some(p => p.id === l.project_id))
+    .map(l => String(l.id)));
+  return (income.forecasts || [])
+    .filter(f => counted.has(String(f.line_id)) && String(f.month).slice(0, 10) === monthKey)
+    .reduce((sum, f) => sum + (Number(f.locations) || 0) * (Number(f.price) || 0), 0);
+}
+function csvCell(v){
+  if (v === null || v === undefined) return "";
+  if (typeof v === "number") return String(Math.round(v * 100) / 100);
+  const s = String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function downloadBurnScenarioCsv(s){
+  const rows = [];
+  rows.push(["Scenario", s.name]);
+  rows.push(["Saved", formatChangeTimestamp(s.created_at), s.created_by || ""]);
+  rows.push(["All figures in ZAR. Burn = monthly revenue forecast - TOTAL EXPENSES; negative means that month burns cash."]);
+  rows.push([]);
+  const exp = s.expenses;
+  if (exp && exp.columns){
+    const cols = exp.columns;
+    const revenue = cols.map(c => incomeRevenue(s.income, burnMonthKey(c.month)));
+    const grand = cols.map((c, i) => burnGrandTotal(exp, i));
+    rows.push(["Expenses", ...cols.map(c => `${c.month} ${c.kind}`)]);
+    rows.push(["Burn (revenue forecast - total expenses)", ...cols.map((c, i) => revenue[i] - grand[i])]);
+    rows.push(["Monthly revenue forecast", ...revenue]);
+    rows.push([exp.grandTotalLabel || "Total expenses", ...grand]);
+    const lastOpexIndex = exp.sections.reduce((last, sec, i) => (sec.inOpex ? i : last), -1);
+    exp.sections.forEach((sec, si) => {
+      rows.push([sec.title, ...cols.map((c, i) => sec.accounts.reduce((sum, a) => sum + (a.values[i] || 0), 0))]);
+      sec.accounts.forEach(a => rows.push(["    " + a.name, ...cols.map((c, i) => a.values[i])]));
+      if (si === lastOpexIndex) rows.push([exp.opexTotalLabel || "Total Operating Expenses", ...cols.map((c, i) => burnOpexTotal(exp, i))]);
+    });
+  } else {
+    rows.push(["(No expenses were saved in this scenario)"]);
+  }
+  rows.push([]);
+  rows.push(["Income (Forecasting page)", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
+  rows.push(["Project", "Line", "In chart", "Measure"]);
+  const projectIndex = (id) => { const i = PROJECTS.findIndex(p => p.id === id); return i === -1 ? PROJECTS.length : i; };
+  const lines = [...((s.income && s.income.lines) || [])].sort((a, b) => projectIndex(a.project_id) - projectIndex(b.project_id) || (a.sort_order || 0) - (b.sort_order || 0));
+  lines.forEach(l => {
+    const project = PROJECTS.find(p => p.id === l.project_id);
+    const byMonth = {};
+    ((s.income && s.income.forecasts) || []).filter(f => String(f.line_id) === String(l.id)).forEach(f => { byMonth[String(f.month).slice(0, 10)] = f; });
+    const base = [project ? project.name : `${l.project_id} (project no longer exists)`, l.label, l.included_in_chart === false ? "No" : "Yes"];
+    rows.push([...base, "Locations", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].locations) || 0 : null)]);
+    rows.push([...base, "Price", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].price) || 0 : null)]);
+    rows.push([...base, "Revenue", ...FORECAST_MONTHS.map(m => byMonth[m] ? (Number(byMonth[m].locations) || 0) * (Number(byMonth[m].price) || 0) : null)]);
+  });
+  const csv = "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+  const stamp = new Date(s.created_at);
+  const pad = (n) => String(n).padStart(2, "0");
+  const when = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
+  const safeName = String(s.name).replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80);
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Burn scenario - ${safeName} - ${when}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 async function saveBurnForecastCell(si, ai, ci, value){
   const account = burnForecast.sections[si].accounts[ai];
@@ -5434,6 +5651,12 @@ function openBurnCellEditor(cell){
   });
 }
 burnForecastPanel.addEventListener("click", (e) => {
+  const scenarioDownload = e.target.closest("[data-burn-scenario-download]");
+  if (scenarioDownload){ downloadBurnScenario(scenarioDownload.dataset.burnScenarioDownload); return; }
+  const scenarioReinstate = e.target.closest("[data-burn-scenario-reinstate]");
+  if (scenarioReinstate){ reinstateBurnScenario(scenarioReinstate.dataset.burnScenarioReinstate); return; }
+  const scenarioDelete = e.target.closest("[data-burn-scenario-delete]");
+  if (scenarioDelete){ deleteBurnScenario(scenarioDelete.dataset.burnScenarioDelete); return; }
   const toggle = e.target.closest("[data-burn-toggle-section]");
   if (toggle){
     const si = Number(toggle.dataset.burnToggleSection);
