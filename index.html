@@ -798,6 +798,12 @@
   .burn-table tr.burn-net-row:hover td{ background:var(--surface-sunken); }
   .burn-table tr.burn-total-row:hover td, .burn-table tr.burn-grand-row:hover td{ background:var(--accent-soft); }
   .burn-table tr.burn-revenue-row:hover td{ background:var(--success-soft); }
+  .burn-table-scroll{ max-height:75vh; }
+  .burn-table tr.burn-net-row td, .burn-table tr.burn-revenue-row td, .burn-table tr.burn-grand-row td{
+    position:sticky; top:0; z-index:2;
+  }
+  .burn-table tr.burn-net-row td.forecast-project-cell, .burn-table tr.burn-revenue-row td.forecast-project-cell,
+  .burn-table tr.burn-grand-row td.forecast-project-cell{ left:0; z-index:3; }
   .burn-scenarios{ margin-bottom:14px; padding:14px 18px; }
   .burn-scenarios-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
   .burn-scenarios-head .settings-section-title{ margin-bottom:0; }
@@ -4276,16 +4282,22 @@ function renderForecastingContent(){
     syncingScroll = false;
   });
 }
-// Keeps the month row, the L/Price row and the Total revenue row pinned while
-// the table scrolls, stacked one under the other (each one's "top" is the
-// combined height of the rows above it, so it has to be measured).
-function pinForecastTableTop(tableEl){
+// Keeps a table's header rows plus the given body rows pinned while it
+// scrolls, stacked one under the other (each one's "top" is the combined
+// height of the rows above it, so it has to be measured).
+function pinTableTop(tableEl, pinnedBodyRows){
   let offset = 0;
   tableEl.querySelectorAll("thead tr").forEach(tr => {
     tr.querySelectorAll("th").forEach(th => { th.style.top = offset + "px"; });
     offset += tr.getBoundingClientRect().height;
   });
-  tableEl.querySelectorAll("tr.forecast-total-row td").forEach(td => { td.style.top = offset + "px"; });
+  tableEl.querySelectorAll(pinnedBodyRows).forEach(tr => {
+    tr.querySelectorAll("td").forEach(td => { td.style.top = offset + "px"; });
+    offset += tr.getBoundingClientRect().height;
+  });
+}
+function pinForecastTableTop(tableEl){
+  pinTableTop(tableEl, "tbody tr.forecast-total-row");
 }
 let forecastResizeTimer = null;
 window.addEventListener("resize", () => {
@@ -5391,6 +5403,7 @@ function renderBurnForecastContent(){
 
   const prevScroll = document.getElementById("burnTableScroll");
   const prevScrollLeft = prevScroll ? prevScroll.scrollLeft : 0;
+  const prevScrollTop = prevScroll ? prevScroll.scrollTop : 0;
   burnForecastPanel.innerHTML = `
     <div class="summary-intro">
       <p>${escapeHtmlText(p.title || "EBITDA Forecasting")}</p>
@@ -5400,7 +5413,7 @@ function renderBurnForecastContent(){
     ${burnScenarioManager.html()}
     <div class="forecast-table-card">
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
-      <div class="forecast-table-scroll" id="burnTableScroll" style="max-height:none;">
+      <div class="forecast-table-scroll burn-table-scroll" id="burnTableScroll">
         <table class="forecast-table burn-table">
           <thead>
             <tr><th rowspan="2" class="forecast-project-cell burn-account-cell">Account</th>${monthHeads.join("")}</tr>
@@ -5419,10 +5432,12 @@ function renderBurnForecastContent(){
 
   const tableScroll = document.getElementById("burnTableScroll");
   const topScrollbar = document.getElementById("burnTopScrollbar");
+  pinTableTop(tableScroll.querySelector("table"), "tbody tr.burn-net-row, tbody tr.burn-revenue-row, tbody tr.burn-grand-row");
   syncBurnTopScrollbarWidth();
   // The table widens once its monospace font finishes loading; keep the top bar matched.
   if (window.ResizeObserver) new ResizeObserver(syncBurnTopScrollbarWidth).observe(tableScroll.querySelector("table"));
   tableScroll.scrollLeft = prevScrollLeft;
+  tableScroll.scrollTop = prevScrollTop;
   topScrollbar.scrollLeft = prevScrollLeft;
   topScrollbar.addEventListener("scroll", () => { if (tableScroll.scrollLeft !== topScrollbar.scrollLeft) tableScroll.scrollLeft = topScrollbar.scrollLeft; });
   tableScroll.addEventListener("scroll", () => { if (topScrollbar.scrollLeft !== tableScroll.scrollLeft) topScrollbar.scrollLeft = tableScroll.scrollLeft; });
