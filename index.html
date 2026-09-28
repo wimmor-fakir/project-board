@@ -778,6 +778,19 @@
   .burn-table .burn-account-name{ font-weight:400; padding-left:26px; }
   .burn-table thead th.burn-kind-budget{ color:var(--ink-3); font-weight:500; }
   .burn-table thead th.burn-kind-actual{ color:var(--ink); }
+  .burn-table thead th.burn-mode-cell{ padding:4px 6px; }
+  .burn-mode-toggle{
+    display:inline-flex; border:1px solid var(--border-strong); border-radius:6px; overflow:hidden;
+  }
+  .burn-mode-btn{
+    appearance:none; border:none; background:var(--surface); color:var(--ink-3); cursor:pointer;
+    font:inherit; font-size:10.5px; font-weight:700; padding:2px 7px; line-height:1.4;
+  }
+  .burn-mode-btn + .burn-mode-btn{ border-left:1px solid var(--border-strong); }
+  .burn-mode-btn:hover{ color:var(--ink); background:var(--surface-sunken); }
+  .burn-mode-btn.active{ background:var(--accent); color:#fff; }
+  .burn-mode-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px; }
+  .burn-table td.burn-forecast{ font-style:italic; }
   .burn-table td.burn-budget{ color:var(--ink-2); }
   .burn-table tr.burn-section-row td{ background:var(--surface-sunken); font-weight:600; color:var(--ink-2); }
   .burn-table td.burn-editable{ cursor:pointer; }
@@ -5266,6 +5279,52 @@ function burnMonthKey(label){
   return `${m[2]}-${String(BURN_MONTH_INDEX[m[1]] + 1).padStart(2, "0")}-01`;
 }
 
+// Every month holds three series — Budget, Actual and Forecast — and shows
+// Budget plus one of the other two (monthModes[month]: "actual" | "forecast").
+// Older documents (the sheet's original Actual-only / Budget-only months) are
+// brought into this shape on load: missing Actuals start empty, a missing
+// Forecast starts as a copy of that month's Budget, and a month starts on
+// Actual only if it already had an Actual column. Idempotent.
+const BURN_KINDS = ["Budget", "Actual", "Forecast"];
+function normalizeBurnPayload(p){
+  if (!p || !Array.isArray(p.columns)) return p;
+  const months = [];
+  p.columns.forEach(c => { if (!months.includes(c.month)) months.push(c.month); });
+  const find = (month, kind) => p.columns.findIndex(c => c.month === month && String(c.kind).toLowerCase() === kind.toLowerCase());
+  const newCols = [];
+  const source = [];
+  months.forEach(m => {
+    const budgetIndex = find(m, "Budget");
+    BURN_KINDS.forEach(kind => {
+      newCols.push({ month: m, kind });
+      const own = find(m, kind);
+      source.push(own !== -1 ? { from: own } : kind === "Forecast" && budgetIndex !== -1 ? { from: budgetIndex } : { from: -1 });
+    });
+  });
+  const unchanged = newCols.length === p.columns.length && source.every((s, i) => s.from === i);
+  if (!unchanged){
+    p.sections.forEach(sec => sec.accounts.forEach(a => {
+      const old = a.values || [];
+      a.values = source.map(s => (s.from === -1 || old[s.from] === undefined ? null : old[s.from]));
+    }));
+  }
+  const hadActual = new Set(months.filter(m => find(m, "Actual") !== -1));
+  p.columns = newCols;
+  p.monthModes = p.monthModes || {};
+  months.forEach(m => { if (p.monthModes[m] !== "actual" && p.monthModes[m] !== "forecast") p.monthModes[m] = hadActual.has(m) ? "actual" : "forecast"; });
+  return p;
+}
+// The two columns shown per month: Budget, then Actual or Forecast.
+function burnDisplayColumns(p){
+  const cols = [];
+  p.columns.forEach((c, i) => {
+    if (c.kind === "Budget") cols.push({ month: c.month, kind: "Budget", dataIndex: i, monthStart: true });
+    const second = (p.monthModes[c.month] === "actual") ? "Actual" : "Forecast";
+    if (c.kind === second) cols.push({ month: c.month, kind: second, dataIndex: i, monthStart: false });
+  });
+  return cols;
+}
+
 function clearBurnForecastState(){
   burnForecast = null;
   burnForecastMeta = null;
@@ -5321,7 +5380,7 @@ async function renderBurnForecast(){
     if (currentId === "burnforecast") burnForecastPanel.innerHTML = `<p class="summary-facts">Couldn't load EBITDA Forecasting — has supabase-burn-forecast.sql been run yet? (${escapeHtmlText(error.message)})</p>`;
     return;
   }
-  burnForecast = data ? data.payload : null;
+  burnForecast = data ? normalizeBurnPayload(data.payload) : null;
   burnForecastMeta = data ? { updated_by: data.updated_by, updated_at: data.updated_at } : null;
   burnForecastLoadedFor = userId;
   if (currentId === "burnforecast") renderBurnForecastContent();
@@ -5338,25 +5397,25 @@ function renderBurnForecastContent(){
     document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
     return;
   }
-  const cols = p.columns;
-  const kindClass = (c) => (String(c.kind).toLowerCase() === "actual" ? "actual" : "budget");
-  const monthStart = cols.map((c, i) => i === 0 || cols[i - 1].month !== c.month);
+  // Display columns (two per month); each points at its series in p.columns via dataIndex.
+  const cols = burnDisplayColumns(p);
+  const kindClass = (c) => String(c.kind).toLowerCase();
+  const monthStart = cols.map(c => c.monthStart);
 
-  const monthHeads = [];
-  cols.forEach((c, i) => {
-    if (!monthStart[i]) return;
-    let span = 1;
-    while (i + span < cols.length && cols[i + span].month === c.month) span++;
-    monthHeads.push(`<th colspan="${span}" class="forecast-month-divider">${escapeHtmlText(c.month)}</th>`);
-  });
-  const kindHeads = cols.map((c, i) => `<th class="burn-kind-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}" title="${escapeHtmlText(c.kind)}">${escapeHtmlText(String(c.kind).charAt(0).toUpperCase())}</th>`).join("");
+  const monthHeads = cols.filter(c => c.monthStart).map(c => `<th colspan="2" class="forecast-month-divider">${escapeHtmlText(c.month)}</th>`);
+  const kindHeads = cols.map(c => {
+    if (c.kind === "Budget") return `<th class="burn-kind-budget forecast-month-divider" title="Budget">B</th>`;
+    const mode = c.kind === "Actual" ? "actual" : "forecast";
+    const btn = (value, label, title) => `<button type="button" class="burn-mode-btn${mode === value ? " active" : ""}" data-burn-mode-month="${escapeHtmlText(c.month)}" data-burn-mode="${value}" aria-pressed="${mode === value}" title="${title}">${label}</button>`;
+    return `<th class="burn-kind-${mode} burn-mode-cell"><span class="burn-mode-toggle" role="group" aria-label="${escapeHtmlText(c.month)}: show Actual or Forecast">${btn("actual", "A", "Show Actual for " + escapeHtmlText(c.month))}${btn("forecast", "F", "Show Forecast for " + escapeHtmlText(c.month))}</span></th>`;
+  }).join("");
   // The whole cell is the click target, not just the figure — an empty cell
-  // is only a "-", far too small to hit reliably.
+  // is only a "-", far too small to hit reliably. fn receives the data index.
   const numCells = (fn, editable) => cols.map((c, i) => {
-    const v = fn(i);
+    const v = fn(c.dataIndex);
     const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${editable ? " burn-editable" : ""}`;
     return editable
-      ? `<td class="${cls}" data-burn-cell="${editable}:${i}" title="Click to edit ${escapeHtmlText(c.month)} ${escapeHtmlText(c.kind)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
+      ? `<td class="${cls}" data-burn-cell="${editable}:${c.dataIndex}" title="Click to edit ${escapeHtmlText(c.month)} ${escapeHtmlText(c.kind)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
       : `<td class="${cls}">${formatZar(v)}</td>`;
   }).join("");
   const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
@@ -5372,7 +5431,7 @@ function renderBurnForecastContent(){
   const burnCells = cols.map((c, i) => {
     const revenue = revenueFor(i);
     if (revenue === null) return `<td class="burn-${kindClass(c)}${dividerClass(i)}">—</td>`;
-    const net = revenue - burnGrandTotal(p, i);
+    const net = revenue - burnGrandTotal(p, c.dataIndex);
     return `<td class="burn-${kindClass(c)}${dividerClass(i)} ${net < 0 ? "burn-negative" : "burn-positive"}">${formatZar(net)}</td>`;
   }).join("");
   const revenueCells = cols.map((c, i) => {
@@ -5429,7 +5488,7 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. A = Actual, B = Budget. Click any account cell to edit it — heading and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. Click any account cell to edit it — heading and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
     ${notesHtml}
   `;
@@ -5650,7 +5709,7 @@ function downloadScenarioCsv(rows, prefix, s){
 }
 function downloadBurnScenarioCsv(s){
   const rows = scenarioHeaderRows(s, "All figures in ZAR. Burn = monthly revenue forecast - TOTAL EXPENSES; negative means that month burns cash.");
-  const exp = s.expenses;
+  const exp = s.expenses ? normalizeBurnPayload(JSON.parse(JSON.stringify(s.expenses))) : null;
   if (exp && exp.columns){
     const cols = exp.columns;
     const revenue = cols.map(c => incomeRevenue(s.income, burnMonthKey(c.month)));
@@ -5711,10 +5770,9 @@ const revenueScenarioManager = createScenarioManager({
 });
 forecastingPanel.addEventListener("click", (e) => { revenueScenarioManager.handleClick(e); });
 
-async function saveBurnForecastCell(si, ai, ci, value){
-  const account = burnForecast.sections[si].accounts[ai];
-  const before = account.values[ci];
-  account.values[ci] = value;
+// Saves the whole sheet after `apply` changed it in memory; `revert` undoes that change if the save fails.
+async function saveBurnPayload(apply, revert){
+  apply();
   burnForecastSaveError = null;
   renderBurnForecastContent();
   const updatedAt = new Date().toISOString();
@@ -5725,12 +5783,22 @@ async function saveBurnForecastCell(si, ai, ci, value){
     updated_at: updatedAt,
   }, { onConflict: "id" });
   if (error){
-    account.values[ci] = before;
+    revert();
     burnForecastSaveError = "Couldn't save that change: " + error.message;
   } else {
     burnForecastMeta = { updated_by: authSession.user.email, updated_at: updatedAt };
   }
   if (currentId === "burnforecast") renderBurnForecastContent();
+}
+function saveBurnForecastCell(si, ai, ci, value){
+  const account = burnForecast.sections[si].accounts[ai];
+  const before = account.values[ci];
+  return saveBurnPayload(() => { account.values[ci] = value; }, () => { account.values[ci] = before; });
+}
+function setBurnMonthMode(month, mode){
+  const before = burnForecast.monthModes[month];
+  if (before === mode) return;
+  return saveBurnPayload(() => { burnForecast.monthModes[month] = mode; }, () => { burnForecast.monthModes[month] = before; });
 }
 function openBurnCellEditor(cell){
   const [si, ai, ci] = cell.dataset.burnCell.split(":").map(Number);
@@ -5764,6 +5832,8 @@ function openBurnCellEditor(cell){
 }
 burnForecastPanel.addEventListener("click", (e) => {
   if (burnScenarioManager.handleClick(e)) return;
+  const modeBtn = e.target.closest("[data-burn-mode-month]");
+  if (modeBtn){ setBurnMonthMode(modeBtn.dataset.burnModeMonth, modeBtn.dataset.burnMode); return; }
   const toggle = e.target.closest("[data-burn-toggle-section]");
   if (toggle){
     const si = Number(toggle.dataset.burnToggleSection);
