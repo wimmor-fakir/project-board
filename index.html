@@ -1015,6 +1015,13 @@
     position:sticky; left:0; background:var(--surface); z-index:1;
   }
   .forecast-table tbody tr:hover .forecast-project-cell{ background:var(--surface-sunken); }
+  .forecast-table tr.forecast-total-row td{
+    font-weight:700; background:var(--success-soft); color:var(--success);
+    font-family:"IBM Plex Mono",monospace; text-align:center;
+  }
+  .forecast-table tr.forecast-total-row td.forecast-project-cell{ text-align:left; font-family:inherit; }
+  .forecast-table tr.forecast-total-row:hover td{ background:var(--success-soft); }
+  .forecast-total-note{ display:block; font-size:10.5px; font-weight:400; color:var(--ink-3); }
   .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
   .forecast-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
   .forecast-cell-input{ width:80px; text-align:right; }
@@ -4015,6 +4022,11 @@ function buildForecastTable(){
     }).join("");
     return headerRow + lineRows;
   }).join("");
+  const totalRow = `
+    <tr class="forecast-total-row">
+      <td class="forecast-project-cell" title="Locations × price for every line ticked for the chart — the same monthly total as the chart and the EBITDA Forecasting page">Total revenue<span class="forecast-total-note">lines ticked for the chart</span></td>
+      ${FORECAST_MONTHS.map(m => `<td colspan="2" class="forecast-month-divider">${formatCurrency(totalForecastRevenue(m))}</td>`).join("")}
+    </tr>`;
   const wrap = document.createElement("div");
   wrap.innerHTML = `
     <table class="forecast-table">
@@ -4022,7 +4034,7 @@ function buildForecastTable(){
         <tr><th class="forecast-project-cell">Project</th>${monthHeaders}</tr>
         <tr><th class="forecast-project-cell"></th>${subHeaders}</tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${totalRow}${rows}</tbody>
     </table>
   `;
   return wrap.firstElementChild;
@@ -4218,12 +4230,14 @@ function renderForecastingContent(){
       <div class="forecast-legend" id="forecastLegend"></div>
       <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
     </div>
+    ${revenueScenarioManager.html()}
     <div class="forecast-table-card">
       <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll" id="forecastTableScroll"></div>
     </div>
   `;
   document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
+  revenueScenarioManager.wire();
 
   const cardEl = document.getElementById("forecastCard");
   const chartHolder = document.getElementById("forecastChartHolder");
@@ -4273,7 +4287,7 @@ async function renderForecasting(){
     return;
   }
   forecastingPanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
-  const loaded = await loadForecastData();
+  const [loaded] = await Promise.all([loadForecastData(), revenueScenarioManager.load()]);
   if (currentId !== "forecasting") return; // user navigated away while this was loading
   if (!loaded){
     forecastingPanel.innerHTML = `<p class="summary-facts">Couldn't load forecasting data — has supabase-project-forecasts.sql been run yet?</p>`;
@@ -5212,11 +5226,6 @@ let burnForecastMeta = null;
 let burnForecastLoadedFor = null;
 let burnForecastSaveError = null;
 let burnRevenueAvailable = false;
-let burnScenarios = [];          // [{ id, name, created_at, created_by }], newest first
-let burnScenariosError = null;
-let burnScenarioName = "";
-let burnScenarioMessage = null;  // { text, isError }
-let burnScenarioBusy = false;
 const burnCollapsedSections = new Set();
 const BURN_MONTH_INDEX = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 // "Sep 2026" -> "2026-09-01" (the Forecasting page's month key), or null if unrecognised.
@@ -5231,9 +5240,8 @@ function clearBurnForecastState(){
   burnForecastMeta = null;
   burnForecastLoadedFor = null;
   burnForecastSaveError = null;
-  burnScenarios = [];
-  burnScenariosError = null;
-  burnScenarioMessage = null;
+  burnScenarioManager.reset();
+  revenueScenarioManager.reset();
   burnForecastPanel.innerHTML = "";
 }
 function formatZar(n){
@@ -5274,7 +5282,7 @@ async function renderBurnForecast(){
   const [{ data, error }, revenueLoaded] = await Promise.all([
     supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle(),
     loadForecastData(),
-    loadBurnScenarios(),
+    burnScenarioManager.load(),
   ]);
   if (!authSession || authSession.user.id !== userId) return;
   burnRevenueAvailable = revenueLoaded;
@@ -5376,7 +5384,7 @@ function renderBurnForecastContent(){
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
-    ${buildBurnScenariosHtml()}
+    ${burnScenarioManager.html()}
     <div class="forecast-table-card">
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll" id="burnTableScroll" style="max-height:none;">
@@ -5394,7 +5402,7 @@ function renderBurnForecastContent(){
     ${notesHtml}
   `;
   document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
-  wireBurnScenarioForm();
+  burnScenarioManager.wire();
 
   const tableScroll = document.getElementById("burnTableScroll");
   const topScrollbar = document.getElementById("burnTopScrollbar");
@@ -5413,115 +5421,139 @@ function syncBurnTopScrollbarWidth(){
 }
 window.addEventListener("resize", syncBurnTopScrollbarWidth);
 
-/* ---------- Burn Forecasting scenarios ---------- */
-// A scenario = expenses (this page's sheet) + income (every Forecasting line
-// and its monthly figures), saved and reinstated by the save_/
-// reinstate_burn_scenario database functions (supabase-burn-scenarios.sql).
-async function loadBurnScenarios(){
-  const { data, error } = await supabaseClient.from("burn_scenarios")
-    .select("id, name, created_at, created_by").order("created_at", { ascending: false });
-  burnScenariosError = error ? error.message : null;
-  burnScenarios = error ? [] : (data || []);
-}
-function buildBurnScenariosHtml(){
-  const msg = burnScenarioMessage
-    ? `<p class="${burnScenarioMessage.isError ? "modal-error" : "burn-scenario-ok"}">${escapeHtmlText(burnScenarioMessage.text)}</p>` : "";
-  let list;
-  if (burnScenariosError){
-    list = `<p class="summary-facts">Couldn't load scenarios — has supabase-burn-scenarios.sql been run yet? (${escapeHtmlText(burnScenariosError)})</p>`;
-  } else if (!burnScenarios.length){
-    list = `<p class="burn-scenario-empty">No saved scenarios yet.</p>`;
-  } else {
-    list = `<div class="burn-scenario-list">${burnScenarios.map(s => `
-      <div class="burn-scenario-row">
-        <div class="burn-scenario-name">${escapeHtmlText(s.name)}</div>
-        <div class="burn-scenario-meta">${escapeHtmlText(formatChangeTimestamp(s.created_at))}${s.created_by ? ` · ${escapeHtmlText(s.created_by)}` : ""}</div>
-        <div class="burn-scenario-actions">
-          <button type="button" class="btn btn-new" data-burn-scenario-download="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>⇩ Download</button>
-          <button type="button" class="btn btn-secondary" data-burn-scenario-reinstate="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>↺ Reinstate</button>
-          <button type="button" class="btn btn-text" data-burn-scenario-delete="${s.id}" ${burnScenarioBusy ? "disabled" : ""}>Delete</button>
+/* ---------- Scenarios (EBITDA Forecasting + Revenue Forecasting) ---------- */
+// One scenario manager per page. A saved scenario is a named, date-stamped
+// snapshot that can be downloaded as a CSV or reinstated; saving and
+// reinstating run as database functions (see supabase-burn-scenarios.sql and
+// supabase-revenue-scenarios.sql) so each is one all-or-nothing step, and a
+// reinstate always auto-saves the current state first.
+function createScenarioManager(cfg){
+  const state = { list: [], error: null, name: "", message: null, busy: false };
+  const ids = { form: cfg.key + "ScenarioForm", name: cfg.key + "ScenarioName", current: cfg.key + "DownloadCurrent" };
+  const disabled = () => (state.busy ? "disabled" : "");
+  async function load(){
+    const { data, error } = await supabaseClient.from(cfg.table)
+      .select("id, name, created_at, created_by").order("created_at", { ascending: false });
+    state.error = error ? error.message : null;
+    state.list = error ? [] : (data || []);
+  }
+  function html(){
+    const msg = state.message
+      ? `<p class="${state.message.isError ? "modal-error" : "burn-scenario-ok"}">${escapeHtmlText(state.message.text)}</p>` : "";
+    let list;
+    if (state.error){
+      list = `<p class="summary-facts">Couldn't load scenarios — has ${escapeHtmlText(cfg.sqlFile)} been run yet? (${escapeHtmlText(state.error)})</p>`;
+    } else if (!state.list.length){
+      list = `<p class="burn-scenario-empty">No saved scenarios yet.</p>`;
+    } else {
+      list = `<div class="burn-scenario-list">${state.list.map(s => `
+        <div class="burn-scenario-row">
+          <div class="burn-scenario-name">${escapeHtmlText(s.name)}</div>
+          <div class="burn-scenario-meta">${escapeHtmlText(formatChangeTimestamp(s.created_at))}${s.created_by ? ` · ${escapeHtmlText(s.created_by)}` : ""}</div>
+          <div class="burn-scenario-actions">
+            <button type="button" class="btn btn-new" data-scenario-kind="${cfg.key}" data-scenario-action="download" data-scenario-id="${s.id}" ${disabled()}>⇩ Download</button>
+            <button type="button" class="btn btn-secondary" data-scenario-kind="${cfg.key}" data-scenario-action="reinstate" data-scenario-id="${s.id}" ${disabled()}>↺ Reinstate</button>
+            <button type="button" class="btn btn-text" data-scenario-kind="${cfg.key}" data-scenario-action="delete" data-scenario-id="${s.id}" ${disabled()}>Delete</button>
+          </div>
+        </div>`).join("")}</div>`;
+    }
+    return `
+      <div class="forecast-table-card burn-scenarios">
+        <div class="burn-scenarios-head">
+          <div class="settings-section-title">Scenarios</div>
+          <span class="burn-scenario-hint">${escapeHtmlText(cfg.hint)}</span>
         </div>
-      </div>`).join("")}</div>`;
+        <form class="mytasks-add burn-scenario-form" id="${ids.form}" autocomplete="off">
+          <input type="text" id="${ids.name}" maxlength="120" placeholder="Name this scenario, e.g. Base case Sep 2026" aria-label="Scenario name" value="${escapeHtmlText(state.name)}" ${disabled()}>
+          <button type="submit" class="btn btn-secondary" ${disabled()}>Save as scenario</button>
+          <button type="button" class="btn btn-new" id="${ids.current}" ${disabled()}>⇩ Download current</button>
+        </form>
+        ${msg}
+        ${list}
+      </div>`;
   }
-  return `
-    <div class="forecast-table-card burn-scenarios">
-      <div class="burn-scenarios-head">
-        <div class="settings-section-title">Scenarios</div>
-        <span class="burn-scenario-hint">Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped.</span>
-      </div>
-      <form class="mytasks-add burn-scenario-form" id="burnScenarioForm" autocomplete="off">
-        <input type="text" id="burnScenarioName" maxlength="120" placeholder="Name this scenario, e.g. Base case Sep 2026" aria-label="Scenario name" value="${escapeHtmlText(burnScenarioName)}" ${burnScenarioBusy ? "disabled" : ""}>
-        <button type="submit" class="btn btn-secondary" ${burnScenarioBusy ? "disabled" : ""}>Save as scenario</button>
-        <button type="button" class="btn btn-new" id="burnDownloadCurrent" ${burnScenarioBusy ? "disabled" : ""}>⇩ Download current</button>
-      </form>
-      ${msg}
-      ${list}
-    </div>`;
-}
-function wireBurnScenarioForm(){
-  const form = document.getElementById("burnScenarioForm");
-  if (!form) return;
-  const nameInput = document.getElementById("burnScenarioName");
-  nameInput.addEventListener("input", () => { burnScenarioName = nameInput.value; });
-  form.addEventListener("submit", (e) => { e.preventDefault(); saveBurnScenario(); });
-  document.getElementById("burnDownloadCurrent").addEventListener("click", () => {
-    downloadBurnScenarioCsv({ name: "Current (not saved)", created_at: new Date().toISOString(), created_by: authSession.user.email, expenses: burnForecast, income: currentForecastIncome() });
-  });
-}
-async function withBurnScenarioBusy(fn){
-  burnScenarioBusy = true;
-  renderBurnForecastContent();
-  try { await fn(); } finally {
-    burnScenarioBusy = false;
-    if (currentId === "burnforecast") renderBurnForecastContent();
+  function wire(){
+    const form = document.getElementById(ids.form);
+    if (!form) return;
+    const nameInput = document.getElementById(ids.name);
+    nameInput.addEventListener("input", () => { state.name = nameInput.value; });
+    form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
+    document.getElementById(ids.current).addEventListener("click", () => {
+      cfg.downloadCsv({ name: "Current (not saved)", created_at: new Date().toISOString(), created_by: authSession.user.email, ...cfg.currentSnapshot() });
+    });
   }
-}
-async function saveBurnScenario(){
-  const name = burnScenarioName.trim();
-  if (!name){ burnScenarioMessage = { text: "Give the scenario a name first.", isError: true }; renderBurnForecastContent(); return; }
-  await withBurnScenarioBusy(async () => {
-    const { error } = await supabaseClient.rpc("save_burn_scenario", { p_name: name });
-    if (error){ burnScenarioMessage = { text: "Couldn't save the scenario: " + error.message, isError: true }; return; }
-    burnScenarioName = "";
-    await loadBurnScenarios();
-    burnScenarioMessage = { text: `Saved "${name}" — ${formatChangeTimestamp(new Date().toISOString())}.`, isError: false };
-  });
-}
-async function reinstateBurnScenario(id){
-  const s = burnScenarios.find(x => x.id === id);
-  if (!s) return;
-  if (!window.confirm(`Reinstate "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})?\n\nThis replaces the expenses on this page AND every line and figure on the Revenue Forecasting page, for everyone.\n\nThe current state is saved as a scenario first, so you can undo this.`)) return;
-  await withBurnScenarioBusy(async () => {
-    const { error } = await supabaseClient.rpc("reinstate_burn_scenario", { p_scenario_id: id });
-    if (error){ burnScenarioMessage = { text: "Couldn't reinstate the scenario: " + error.message, isError: true }; return; }
-    burnScenarioMessage = { text: `Reinstated "${s.name}". The previous state was saved as a scenario.`, isError: false };
-  });
-  if (!burnScenarioMessage.isError){
-    const message = burnScenarioMessage;
-    await renderBurnForecast();
-    burnScenarioMessage = message;
-    if (currentId === "burnforecast") renderBurnForecastContent();
+  async function withBusy(fn){
+    state.busy = true;
+    cfg.rerender();
+    try { await fn(); } finally {
+      state.busy = false;
+      if (currentId === cfg.pageId) cfg.rerender();
+    }
   }
-}
-async function deleteBurnScenario(id){
-  const s = burnScenarios.find(x => x.id === id);
-  if (!s || !window.confirm(`Delete the scenario "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})? This can't be undone.`)) return;
-  await withBurnScenarioBusy(async () => {
-    const { error } = await supabaseClient.from("burn_scenarios").delete().eq("id", id);
-    if (error){ burnScenarioMessage = { text: "Couldn't delete the scenario: " + error.message, isError: true }; return; }
-    await loadBurnScenarios();
-    burnScenarioMessage = { text: `Deleted "${s.name}".`, isError: false };
-  });
-}
-async function downloadBurnScenario(id){
-  const { data, error } = await supabaseClient.from("burn_scenarios").select("*").eq("id", id).maybeSingle();
-  if (error || !data){
-    burnScenarioMessage = { text: "Couldn't download the scenario" + (error ? ": " + error.message : "."), isError: true };
-    renderBurnForecastContent();
-    return;
+  async function save(){
+    const name = state.name.trim();
+    if (!name){ state.message = { text: "Give the scenario a name first.", isError: true }; cfg.rerender(); return; }
+    await withBusy(async () => {
+      const { error } = await supabaseClient.rpc(cfg.saveRpc, { p_name: name });
+      if (error){ state.message = { text: "Couldn't save the scenario: " + error.message, isError: true }; return; }
+      state.name = "";
+      await load();
+      state.message = { text: `Saved "${name}" — ${formatChangeTimestamp(new Date().toISOString())}.`, isError: false };
+    });
   }
-  downloadBurnScenarioCsv(data);
+  async function reinstate(id){
+    const s = state.list.find(x => x.id === id);
+    if (!s) return;
+    if (!window.confirm(`Reinstate "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})?\n\n${cfg.reinstateWarning}\n\nThe current state is saved as a scenario first, so you can undo this.`)) return;
+    let ok = false;
+    await withBusy(async () => {
+      const { error } = await supabaseClient.rpc(cfg.reinstateRpc, { p_scenario_id: id });
+      if (error){ state.message = { text: "Couldn't reinstate the scenario: " + error.message, isError: true }; return; }
+      ok = true;
+    });
+    if (!ok) return;
+    await cfg.afterReinstate();   // reloads the page's data, and this list
+    state.message = { text: `Reinstated "${s.name}". The previous state was saved as a scenario.`, isError: false };
+    if (currentId === cfg.pageId) cfg.rerender();
+  }
+  async function remove(id){
+    const s = state.list.find(x => x.id === id);
+    if (!s || !window.confirm(`Delete the scenario "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})? This can't be undone.`)) return;
+    await withBusy(async () => {
+      const { error } = await supabaseClient.from(cfg.table).delete().eq("id", id);
+      if (error){ state.message = { text: "Couldn't delete the scenario: " + error.message, isError: true }; return; }
+      await load();
+      state.message = { text: `Deleted "${s.name}".`, isError: false };
+    });
+  }
+  async function download(id){
+    const { data, error } = await supabaseClient.from(cfg.table).select("*").eq("id", id).maybeSingle();
+    if (error || !data){
+      state.message = { text: "Couldn't download the scenario" + (error ? ": " + error.message : "."), isError: true };
+      cfg.rerender();
+      return;
+    }
+    cfg.downloadCsv(data);
+  }
+  // Returns true if the click was one of this manager's buttons.
+  function handleClick(e){
+    const btn = e.target.closest(`[data-scenario-kind="${cfg.key}"]`);
+    if (!btn) return false;
+    const id = btn.dataset.scenarioId;
+    if (btn.dataset.scenarioAction === "download") download(id);
+    else if (btn.dataset.scenarioAction === "reinstate") reinstate(id);
+    else if (btn.dataset.scenarioAction === "delete") remove(id);
+    return true;
+  }
+  function reset(){
+    state.list = [];
+    state.error = null;
+    state.message = null;
+    state.busy = false;
+  }
+  return { load, html, wire, handleClick, reset };
 }
+
 // The Forecasting data currently in memory, in the same shape a saved scenario uses.
 function currentForecastIncome(){
   const lines = [];
@@ -5530,7 +5562,7 @@ function currentForecastIncome(){
   Object.entries(forecastData).forEach(([lineId, months]) => Object.entries(months).forEach(([month, v]) => forecasts.push({ line_id: Number(lineId), month, locations: v.locations, price: v.price })));
   return { lines, forecasts };
 }
-// Same rule as the live revenue row: lines ticked for the Forecasting chart, on projects that still exist.
+// Same rule as the live revenue rows: lines ticked for the Forecasting chart, on projects that still exist.
 function incomeRevenue(income, monthKey){
   if (!income || !monthKey) return 0;
   const counted = new Set((income.lines || [])
@@ -5546,12 +5578,44 @@ function csvCell(v){
   const s = String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function downloadBurnScenarioCsv(s){
+function scenarioHeaderRows(s, note){
+  return [["Scenario", s.name], ["Saved", formatChangeTimestamp(s.created_at), s.created_by || ""], [note], []];
+}
+// Per-line locations / price / revenue for every Forecasting month.
+function incomeDetailRows(income){
   const rows = [];
-  rows.push(["Scenario", s.name]);
-  rows.push(["Saved", formatChangeTimestamp(s.created_at), s.created_by || ""]);
-  rows.push(["All figures in ZAR. Burn = monthly revenue forecast - TOTAL EXPENSES; negative means that month burns cash."]);
-  rows.push([]);
+  rows.push(["Income (Revenue Forecasting page)", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
+  rows.push(["Project", "Line", "In chart", "Measure"]);
+  const projectIndex = (id) => { const i = PROJECTS.findIndex(p => p.id === id); return i === -1 ? PROJECTS.length : i; };
+  const lines = [...((income && income.lines) || [])].sort((a, b) => projectIndex(a.project_id) - projectIndex(b.project_id) || (a.sort_order || 0) - (b.sort_order || 0));
+  lines.forEach(l => {
+    const project = PROJECTS.find(p => p.id === l.project_id);
+    const byMonth = {};
+    ((income && income.forecasts) || []).filter(f => String(f.line_id) === String(l.id)).forEach(f => { byMonth[String(f.month).slice(0, 10)] = f; });
+    const base = [project ? project.name : `${l.project_id} (project no longer exists)`, l.label, l.included_in_chart === false ? "No" : "Yes"];
+    rows.push([...base, "Locations", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].locations) || 0 : null)]);
+    rows.push([...base, "Price", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].price) || 0 : null)]);
+    rows.push([...base, "Revenue", ...FORECAST_MONTHS.map(m => byMonth[m] ? (Number(byMonth[m].locations) || 0) * (Number(byMonth[m].price) || 0) : null)]);
+  });
+  return rows;
+}
+function downloadScenarioCsv(rows, prefix, s){
+  const csv = "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+  const stamp = new Date(s.created_at);
+  const pad = (n) => String(n).padStart(2, "0");
+  const when = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
+  const safeName = String(s.name).replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80);
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${prefix} - ${safeName} - ${when}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function downloadBurnScenarioCsv(s){
+  const rows = scenarioHeaderRows(s, "All figures in ZAR. Burn = monthly revenue forecast - TOTAL EXPENSES; negative means that month burns cash.");
   const exp = s.expenses;
   if (exp && exp.columns){
     const cols = exp.columns;
@@ -5571,33 +5635,47 @@ function downloadBurnScenarioCsv(s){
     rows.push(["(No expenses were saved in this scenario)"]);
   }
   rows.push([]);
-  rows.push(["Income (Revenue Forecasting page)", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
-  rows.push(["Project", "Line", "In chart", "Measure"]);
-  const projectIndex = (id) => { const i = PROJECTS.findIndex(p => p.id === id); return i === -1 ? PROJECTS.length : i; };
-  const lines = [...((s.income && s.income.lines) || [])].sort((a, b) => projectIndex(a.project_id) - projectIndex(b.project_id) || (a.sort_order || 0) - (b.sort_order || 0));
-  lines.forEach(l => {
-    const project = PROJECTS.find(p => p.id === l.project_id);
-    const byMonth = {};
-    ((s.income && s.income.forecasts) || []).filter(f => String(f.line_id) === String(l.id)).forEach(f => { byMonth[String(f.month).slice(0, 10)] = f; });
-    const base = [project ? project.name : `${l.project_id} (project no longer exists)`, l.label, l.included_in_chart === false ? "No" : "Yes"];
-    rows.push([...base, "Locations", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].locations) || 0 : null)]);
-    rows.push([...base, "Price", ...FORECAST_MONTHS.map(m => byMonth[m] ? Number(byMonth[m].price) || 0 : null)]);
-    rows.push([...base, "Revenue", ...FORECAST_MONTHS.map(m => byMonth[m] ? (Number(byMonth[m].locations) || 0) * (Number(byMonth[m].price) || 0) : null)]);
-  });
-  const csv = "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n");
-  const stamp = new Date(s.created_at);
-  const pad = (n) => String(n).padStart(2, "0");
-  const when = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
-  const safeName = String(s.name).replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80);
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `Burn scenario - ${safeName} - ${when}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  rows.push(...incomeDetailRows(s.income));
+  downloadScenarioCsv(rows, "EBITDA scenario", s);
 }
+function downloadRevenueScenarioCsv(s){
+  const rows = scenarioHeaderRows(s, "All figures in ZAR. Total revenue counts the lines ticked for the Revenue Forecasting chart.");
+  rows.push(["", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
+  rows.push(["Total revenue", "", "", "", ...FORECAST_MONTHS.map(m => incomeRevenue(s.income, m))]);
+  rows.push([]);
+  rows.push(...incomeDetailRows(s.income));
+  downloadScenarioCsv(rows, "Revenue scenario", s);
+}
+
+const burnScenarioManager = createScenarioManager({
+  key: "burn",
+  pageId: "burnforecast",
+  table: "burn_scenarios",
+  saveRpc: "save_burn_scenario",
+  reinstateRpc: "reinstate_burn_scenario",
+  sqlFile: "supabase-burn-scenarios.sql",
+  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped.",
+  reinstateWarning: "This replaces the expenses on this page AND every line and figure on the Revenue Forecasting page, for everyone.",
+  rerender: () => renderBurnForecastContent(),
+  afterReinstate: () => renderBurnForecast(),
+  currentSnapshot: () => ({ expenses: burnForecast, income: currentForecastIncome() }),
+  downloadCsv: downloadBurnScenarioCsv,
+});
+const revenueScenarioManager = createScenarioManager({
+  key: "revenue",
+  pageId: "forecasting",
+  table: "revenue_scenarios",
+  saveRpc: "save_revenue_scenario",
+  reinstateRpc: "reinstate_revenue_scenario",
+  sqlFile: "supabase-revenue-scenarios.sql",
+  hint: "Saves every line and its monthly locations and price on this page, date-stamped.",
+  reinstateWarning: "This replaces every line and figure on this page, for everyone — the revenue on the EBITDA Forecasting page follows it too.",
+  rerender: () => renderForecastingContent(),
+  afterReinstate: () => renderForecasting(),
+  currentSnapshot: () => ({ income: currentForecastIncome() }),
+  downloadCsv: downloadRevenueScenarioCsv,
+});
+forecastingPanel.addEventListener("click", (e) => { revenueScenarioManager.handleClick(e); });
 
 async function saveBurnForecastCell(si, ai, ci, value){
   const account = burnForecast.sections[si].accounts[ai];
@@ -5651,12 +5729,7 @@ function openBurnCellEditor(cell){
   });
 }
 burnForecastPanel.addEventListener("click", (e) => {
-  const scenarioDownload = e.target.closest("[data-burn-scenario-download]");
-  if (scenarioDownload){ downloadBurnScenario(scenarioDownload.dataset.burnScenarioDownload); return; }
-  const scenarioReinstate = e.target.closest("[data-burn-scenario-reinstate]");
-  if (scenarioReinstate){ reinstateBurnScenario(scenarioReinstate.dataset.burnScenarioReinstate); return; }
-  const scenarioDelete = e.target.closest("[data-burn-scenario-delete]");
-  if (scenarioDelete){ deleteBurnScenario(scenarioDelete.dataset.burnScenarioDelete); return; }
+  if (burnScenarioManager.handleClick(e)) return;
   const toggle = e.target.closest("[data-burn-toggle-section]");
   if (toggle){
     const si = Number(toggle.dataset.burnToggleSection);

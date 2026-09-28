@@ -48,6 +48,10 @@ when you open the live site** — all one-time, no-code steps:
      before running it — it changes the `project_forecasts` table's
      primary key and drops its old `project_id` column (your data is kept,
      just moved onto "Line 1").
+   - **Then run `supabase-revenue-scenarios.sql`** — adds named,
+     date-stamped scenarios to the Revenue Forecasting page (a snapshot of
+     every line and its monthly locations/price) that can be downloaded as
+     a CSV or reinstated.
    - **Already had lines but no per-line checkbox to include/exclude a
      line from the chart?** Run `supabase-migration-forecast-line-chart-toggle.sql`
      once — it adds that column, defaulting every existing line to
@@ -528,6 +532,7 @@ typed.
 | Run `supabase-personal-tasks.sql` too | Creates the tables behind the My Tasks page — private to-do lists that only their owner can read or change |
 | Run `supabase-burn-forecast.sql` too, then the private figures script | Creates the Burn Forecasting table (readable only by the admin and people ticked for it) and loads the figures — the figures script is never committed |
 | Run `supabase-burn-scenarios.sql` too | Adds Burn Forecasting scenarios (save / download / reinstate expenses + Forecasting income together), same access rule |
+| Run `supabase-revenue-scenarios.sql` too | Adds Revenue Forecasting scenarios (save / download / reinstate every forecast line and its monthly figures) |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
