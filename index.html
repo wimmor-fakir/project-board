@@ -1029,6 +1029,9 @@
   .forecast-table tr.forecast-total-row td.forecast-project-cell{ text-align:left; font-family:inherit; left:0; z-index:3; }
   .forecast-table tr.forecast-total-row:hover td{ background:var(--success-soft); }
   .forecast-total-note{ display:block; font-size:10.5px; font-weight:400; color:var(--ink-3); }
+  .forecast-table td.forecast-project-revenue{
+    text-align:center; font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--ink-2);
+  }
   .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
   .forecast-cell-editable:hover{ text-decoration:underline; color:var(--accent); }
   .forecast-cell-input{ width:80px; text-align:right; }
@@ -4000,7 +4003,10 @@ function buildForecastTable(){
             <button type="button" class="forecast-line-step-btn" data-add-line-project="${p.id}" title="Add a line">+</button>
           </span>
         </td>
-        ${FORECAST_MONTHS.map(() => `<td colspan="2" class="forecast-month-divider"></td>`).join("")}
+        ${FORECAST_MONTHS.map(m => {
+          const revenue = projectForecastRevenue(p.id, m);
+          return `<td colspan="2" class="forecast-month-divider forecast-project-revenue" title="${escapeHtmlText(p.name)} — ${forecastMonthLabel(m, true)}: lines ticked for the chart">${revenue ? formatCurrency(revenue) : ""}</td>`;
+        }).join("")}
       </tr>
     `;
     const lineRows = lines.map(line => {
