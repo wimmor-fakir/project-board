@@ -5641,7 +5641,7 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. A Forecast figure is the same as Budget (shown in grey) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. ${xeroActualError
+      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. A Forecast figure is the same as Budget (shown in grey) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. While editing a Budget or Forecast cell, → (or Shift+Enter) copies the value into that row for every later month. ${xeroActualError
         ? `Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})`
         : `Revenue in A columns is actual Sales from Xero (accrual basis)${xeroActualRefreshedAt ? `, last refreshed ${escapeHtmlText(formatChangeTimestamp(xeroActualRefreshedAt))}` : " — none loaded yet"}; a dashed underline marks a month that's still in progress (month to date).`}${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
@@ -5956,6 +5956,35 @@ function saveBurnForecastCell(si, ai, ci, value){
   const before = account.values[ci];
   return saveBurnPayload(() => { account.values[ci] = value; }, () => { account.values[ci] = before; });
 }
+// Columns of the same kind (Budget or Forecast) in every month after column ci —
+// columns run in month order, so that's simply the later ones of that kind.
+function burnLaterColumns(p, ci){
+  const kind = p.columns[ci].kind;
+  return p.columns.map((c, i) => i).filter(i => i > ci && p.columns[i].kind === kind);
+}
+// Saves value into column ci and every later month's cell of the same kind
+// for that account (shown or hidden by the month picker). For Forecast, an
+// empty value puts all of them back to following Budget.
+function copyBurnValueRight(si, ai, ci, value){
+  const p = burnForecast;
+  const account = p.sections[si].accounts[ai];
+  const col = p.columns[ci];
+  const later = burnLaterColumns(p, ci);
+  const range = `${col.month} and all ${later.length} month${later.length === 1 ? "" : "s"} after it (to ${p.columns[later[later.length - 1]].month})`;
+  const what = value === null
+    ? (col.kind === "Forecast" ? `Set ${account.name}'s Forecast back to following Budget` : `Clear ${account.name}'s Budget`)
+    : `Copy ${formatZar(value)} into ${account.name}'s ${col.kind}`;
+  if (!window.confirm(`${what} for ${range}?\n\nThis replaces whatever is in those months.`)){
+    renderBurnForecastContent();
+    return;
+  }
+  const targets = [ci, ...later];
+  const before = targets.map(i => account.values[i]);
+  return saveBurnPayload(
+    () => { targets.forEach(i => { account.values[i] = value; }); },
+    () => { targets.forEach((i, k) => { account.values[i] = before[k]; }); }
+  );
+}
 function setBurnMonthMode(month, mode){
   const before = burnForecast.monthModes[month];
   if (before === mode) return;
@@ -5974,23 +6003,40 @@ function openBurnCellEditor(cell){
   input.value = shown === null || shown === undefined ? "" : String(shown);
   cell.innerHTML = "";
   cell.appendChild(input);
+  // Budget and Forecast cells (not Actuals, which come from Xero) can be
+  // copied into every later month: the → button, or Shift+Enter.
+  const kind = burnForecast.columns[ci].kind;
+  const canCopy = (kind === "Budget" || kind === "Forecast") && burnLaterColumns(burnForecast, ci).length > 0;
+  if (canCopy){
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "forecast-copy-btn";
+    copyBtn.textContent = "→";
+    copyBtn.title = `Save and copy to this row's ${kind} in every later month (Shift+Enter)`;
+    copyBtn.setAttribute("aria-label", copyBtn.title);
+    // Keep focus in the input, so its blur doesn't save before the copy runs.
+    copyBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    copyBtn.addEventListener("click", (e) => { e.stopPropagation(); finish(true, true); });
+    cell.appendChild(copyBtn);
+  }
   input.focus();
   input.select();
   let settled = false;
-  const finish = (save) => {
+  const finish = (save, copyRight) => {
     if (settled) return;
     settled = true;
     const value = parseZarInput(input.value);
     if (save && value === undefined){
       burnForecastSaveError = `Couldn't read "${input.value}" as an amount — type digits only, e.g. 90000, 90,000 or (1,500) for a negative. Nothing was changed.`;
       renderBurnForecastContent();
-    } else if (save && value !== (shown === undefined ? null : shown)) saveBurnForecastCell(si, ai, ci, value);
+    } else if (save && copyRight) copyBurnValueRight(si, ai, ci, value);
+    else if (save && value !== (shown === undefined ? null : shown)) saveBurnForecastCell(si, ai, ci, value);
     else renderBurnForecastContent();
   };
   input.addEventListener("blur", () => finish(true));
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
-    if (e.key === "Enter") finish(true);
+    if (e.key === "Enter") finish(true, canCopy && e.shiftKey);
     else if (e.key === "Escape") finish(false);
   });
 }
