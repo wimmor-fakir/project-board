@@ -791,6 +791,7 @@
   .burn-mode-btn.active{ background:var(--accent); color:#fff; }
   .burn-mode-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px; }
   .burn-table td.burn-forecast{ font-style:italic; }
+  .burn-table td.burn-xero-partial{ text-decoration:underline dashed var(--ink-3); text-underline-offset:3px; }
   .burn-table td.burn-budget{ color:var(--ink-2); }
   .burn-table tr.burn-section-row td{ background:var(--surface-sunken); font-weight:600; color:var(--ink-2); }
   .burn-table td.burn-editable{ cursor:pointer; }
@@ -5402,11 +5403,40 @@ function burnDisplayColumns(p){
   return cols;
 }
 
+// Actual revenue per month from Xero (Sales, accrual), loaded into the
+// xero_actual_revenue table — see supabase-xero-actual-revenue.sql. Months
+// switched to A use it in place of the Revenue Forecasting forecast.
+// xeroActualRevenue["2026-08-01"] = { revenue, through: "2026-08-31" }.
+let xeroActualRevenue = {};
+let xeroActualError = null;
+let xeroActualRefreshedAt = null;
+async function loadXeroActualRevenue(){
+  const { data, error } = await supabaseClient.from("xero_actual_revenue").select("month, revenue, through_date, refreshed_at");
+  xeroActualRevenue = {};
+  xeroActualRefreshedAt = null;
+  xeroActualError = error ? error.message : null;
+  (data || []).forEach(r => {
+    xeroActualRevenue[String(r.month).slice(0, 10)] = { revenue: Number(r.revenue), through: String(r.through_date).slice(0, 10) };
+    if (!xeroActualRefreshedAt || r.refreshed_at > xeroActualRefreshedAt) xeroActualRefreshedAt = r.refreshed_at;
+  });
+}
+function xeroRevenueFor(monthKey){
+  return (monthKey && xeroActualRevenue[monthKey]) || null;
+}
+// True when the figure stops before the month's last day (a month still in progress).
+function xeroRevenueIsPartial(monthKey, row){
+  const [y, m] = monthKey.split("-").map(Number);
+  return row.through < new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
 function clearBurnForecastState(){
   burnForecast = null;
   burnForecastMeta = null;
   burnForecastLoadedFor = null;
   burnForecastSaveError = null;
+  xeroActualRevenue = {};
+  xeroActualError = null;
+  xeroActualRefreshedAt = null;
   burnScenarioManager.reset();
   revenueScenarioManager.reset();
   burnForecastPanel.innerHTML = "";
@@ -5450,6 +5480,7 @@ async function renderBurnForecast(){
     supabaseClient.from("burn_forecast").select("payload, updated_by, updated_at").eq("id", "main").maybeSingle(),
     loadForecastData(),
     burnScenarioManager.load(),
+    loadXeroActualRevenue(),
   ]);
   if (!authSession || authSession.user.id !== userId) return;
   burnRevenueAvailable = revenueLoaded;
@@ -5504,25 +5535,45 @@ function renderBurnForecastContent(){
   const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
-  // A month's revenue forecast repeats in each of its columns (A and B), so
-  // every column gets its own burn figure against that column's expenses.
+  // Each column gets its own revenue and burn figure: an Actual (A) column
+  // uses that month's actual Sales from Xero; Budget and Forecast columns use
+  // the Revenue Forecasting page's forecast for the month.
   const revenueFor = (i) => {
     const key = burnMonthKey(cols[i].month);
+    if (cols[i].kind === "Actual"){
+      const x = xeroRevenueFor(key);
+      return x ? x.revenue : null;
+    }
     return burnRevenueAvailable && key && FORECAST_MONTHS.includes(key) ? totalForecastRevenue(key) : null;
+  };
+  // Actual columns whose Xero figure covers only part of the month.
+  const partialClass = (c) => {
+    if (c.kind !== "Actual") return "";
+    const key = burnMonthKey(c.month);
+    const x = xeroRevenueFor(key);
+    return x && xeroRevenueIsPartial(key, x) ? " burn-xero-partial" : "";
   };
   const dividerClass = (i) => (monthStart[i] ? " forecast-month-divider" : "");
   const burnCells = cols.map((c, i) => {
     const revenue = revenueFor(i);
     if (revenue === null) return `<td class="burn-${kindClass(c)}${dividerClass(i)}">—</td>`;
     const net = revenue - burnGrandTotal(p, c.dataIndex);
-    return `<td class="burn-${kindClass(c)}${dividerClass(i)} ${net < 0 ? "burn-negative" : "burn-positive"}">${formatZar(net)}</td>`;
+    return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)} ${net < 0 ? "burn-negative" : "burn-positive"}">${formatZar(net)}</td>`;
   }).join("");
   const revenueCells = cols.map((c, i) => {
     const revenue = revenueFor(i);
-    return `<td class="burn-${kindClass(c)}${dividerClass(i)}">${revenue === null ? "—" : formatZar(revenue)}</td>`;
+    let title = "";
+    if (c.kind === "Actual"){
+      const key = burnMonthKey(c.month);
+      const x = xeroRevenueFor(key);
+      title = !x ? `No Xero actual revenue loaded for ${c.month}`
+        : xeroRevenueIsPartial(key, x) ? `Xero Sales (accrual) for ${c.month} — month to date, up to ${formatDateWithYear(x.through)} only`
+        : `Xero Sales (accrual) for ${c.month}`;
+    }
+    return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)}"${title ? ` title="${escapeHtmlText(title)}"` : ""}>${revenue === null ? "—" : formatZar(revenue)}</td>`;
   }).join("");
-  let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue forecast minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue forecast − total expenses</span></td>${burnCells}</tr>`;
-  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Revenue Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Revenue Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Revenue Forecasting page</span></td>${revenueCells}</tr>`;
+  let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue − total expenses</span></td>${burnCells}</tr>`;
+  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="A (Actual) columns: that month's Sales in Xero (accrual basis). B and F columns: the Revenue Forecasting page's total for the month (locations × price), excluding lines unticked for its chart${burnRevenueAvailable ? "" : " — couldn't load that page's data"}">Monthly revenue<span class="burn-section-detail">A: actual from Xero · B / F: Revenue Forecasting</span></td>${revenueCells}</tr>`;
   body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
@@ -5572,7 +5623,9 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. Click any account cell to edit it — heading and total rows recalculate automatically.${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. Click any account cell to edit it — heading and total rows recalculate automatically. ${xeroActualError
+        ? `Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})`
+        : `Revenue in A columns is actual Sales from Xero (accrual basis)${xeroActualRefreshedAt ? `, last refreshed ${escapeHtmlText(formatChangeTimestamp(xeroActualRefreshedAt))}` : " — none loaded yet"}; a dashed underline marks a month that's still in progress (month to date).`}${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
     ${notesHtml}
   `;
@@ -5793,15 +5846,20 @@ function downloadScenarioCsv(rows, prefix, s){
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function downloadBurnScenarioCsv(s){
-  const rows = scenarioHeaderRows(s, "All figures in ZAR. Burn = monthly revenue forecast - TOTAL EXPENSES; negative means that month burns cash.");
+  const rows = scenarioHeaderRows(s, "All figures in ZAR. Burn = monthly revenue - TOTAL EXPENSES; negative means that month burns cash. Actual columns' revenue is actual Sales from Xero (accrual) as currently loaded - not part of the saved scenario; Budget and Forecast columns use the scenario's revenue forecast.");
   const exp = s.expenses ? normalizeBurnPayload(JSON.parse(JSON.stringify(s.expenses))) : null;
   if (exp && exp.columns){
     const cols = exp.columns;
-    const revenue = cols.map(c => incomeRevenue(s.income, burnMonthKey(c.month)));
+    const revenue = cols.map(c => {
+      const key = burnMonthKey(c.month);
+      if (c.kind !== "Actual") return incomeRevenue(s.income, key);
+      const x = xeroRevenueFor(key);
+      return x ? x.revenue : "";
+    });
     const grand = cols.map((c, i) => burnGrandTotal(exp, i));
     rows.push(["Expenses", ...cols.map(c => `${c.month} ${c.kind}`)]);
-    rows.push(["Burn (revenue forecast - total expenses)", ...cols.map((c, i) => revenue[i] - grand[i])]);
-    rows.push(["Monthly revenue forecast", ...revenue]);
+    rows.push(["Burn (revenue - total expenses)", ...cols.map((c, i) => (revenue[i] === "" ? "" : Math.round((revenue[i] - grand[i]) * 100) / 100))]);
+    rows.push(["Monthly revenue (Actual: Xero Sales; Budget/Forecast: revenue forecast)", ...revenue]);
     rows.push([exp.grandTotalLabel || "Total expenses", ...grand]);
     const lastOpexIndex = exp.sections.reduce((last, sec, i) => (sec.inOpex ? i : last), -1);
     exp.sections.forEach((sec, si) => {

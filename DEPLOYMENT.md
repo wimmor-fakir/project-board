@@ -102,6 +102,12 @@ when you open the live site** — all one-time, no-code steps:
      page's expenses together with every Forecasting line and figure) that
      can be downloaded as a CSV or reinstated. Same access rule as the
      Burn Forecasting table.
+   - **Then run `supabase-xero-actual-revenue.sql`** — creates the table
+     holding each month's actual Sales from Xero (accrual basis), which
+     EBITDA Forecasting uses as the revenue in months switched to A
+     (Actual). Same read rule as the EBITDA figures; nobody can edit it
+     from the page. The figures are loaded (and later refreshed) from a
+     private SQL script run in the SQL Editor — never committed here.
 7. **Create at least one user account for yourself** — see Part 4 below
    ("What's left is entirely on the Supabase side"). Without an account,
    the sign-in screen has no one to let in.
@@ -533,6 +539,7 @@ typed.
 | Run `supabase-burn-forecast.sql` too, then the private figures script | Creates the Burn Forecasting table (readable only by the admin and people ticked for it) and loads the figures — the figures script is never committed |
 | Run `supabase-burn-scenarios.sql` too | Adds Burn Forecasting scenarios (save / download / reinstate expenses + Forecasting income together), same access rule |
 | Run `supabase-revenue-scenarios.sql` too | Adds Revenue Forecasting scenarios (save / download / reinstate every forecast line and its monthly figures) |
+| Run `supabase-xero-actual-revenue.sql` too, then the private Xero revenue script | Holds actual monthly Sales from Xero for EBITDA Forecasting's A (Actual) columns — the figures script is never committed |
 | Create at least one user account (Part 4) | The sign-in screen has no one to let in until an account exists |
 | Deploy `manage-users` (Part 5) | Powers Settings' invite/remove-user controls — everything else works without this one |
 | Run `supabase-sim-daily-balances.sql` too | Creates the table the SIM Cards function writes daily balances to, for recharge detection (Part 6) — backfill 1 September 2026 onward by hand |
