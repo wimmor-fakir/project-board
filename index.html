@@ -987,6 +987,18 @@
     scrollbar-color:var(--border-strong) transparent;
   }
   .forecast-top-scrollbar-inner{ height:1px; }
+  .month-range{
+    display:flex; align-items:center; gap:8px 12px; flex-wrap:wrap;
+    margin-bottom:12px; font-size:12.5px; color:var(--ink-2);
+  }
+  .month-range label{ display:flex; align-items:center; gap:6px; }
+  .month-range select{
+    font:inherit; font-size:12.5px; color:var(--ink);
+    background:var(--surface-sunken); border:1px solid var(--border); border-radius:8px;
+    padding:5px 8px;
+  }
+  .month-range select:focus{ outline:2px solid var(--focus); outline-offset:1px; background:var(--surface); }
+  .month-range-count{ font-size:11.5px; color:var(--ink-3); }
   .forecast-table-scroll{
     overflow:auto;
     max-height:60vh;
@@ -3841,6 +3853,65 @@ function forecastMonthLabel(monthStr, withYear){
 function formatCurrency(n){
   return "R" + Math.round(n).toLocaleString();
 }
+
+// Month-range picker shared by the Revenue and EBITDA Forecasting tables:
+// which month columns the table shows. A per-viewer view setting, so it's
+// remembered in this browser rather than saved to the database.
+// `months` is [{ key, label }] in order; the stored range is { from, to } keys.
+function loadMonthRange(storageKey){
+  try {
+    const v = JSON.parse(localStorage.getItem(storageKey) || "null");
+    return v && v.from && v.to ? v : null;
+  } catch (e) { return null; }
+}
+function saveMonthRange(storageKey, range){
+  try {
+    if (range) localStorage.setItem(storageKey, JSON.stringify(range));
+    else localStorage.removeItem(storageKey);
+  } catch (e) {}
+}
+// The stored range as { from, to } indexes into months — every month when
+// nothing is stored, or when a stored month no longer exists.
+function resolveMonthRange(storageKey, months){
+  const range = loadMonthRange(storageKey);
+  let from = range ? months.findIndex(m => m.key === range.from) : -1;
+  let to = range ? months.findIndex(m => m.key === range.to) : -1;
+  if (from === -1) from = 0;
+  if (to === -1) to = months.length - 1;
+  if (from > to) [from, to] = [to, from];
+  return { from, to };
+}
+function monthRangeHtml(id, months, sel){
+  const options = (selected) => months.map((m, i) => `<option value="${i}"${i === selected ? " selected" : ""}>${escapeHtmlText(m.label)}</option>`).join("");
+  const all = sel.from === 0 && sel.to === months.length - 1;
+  return `
+    <div class="month-range" id="${id}">
+      <label>Show <select data-month-range="from" aria-label="First month to show">${options(sel.from)}</select></label>
+      <label>to <select data-month-range="to" aria-label="Last month to show">${options(sel.to)}</select></label>
+      <button type="button" class="btn btn-text" data-month-range="all" ${all ? "disabled" : ""}>All months</button>
+      <span class="month-range-count">${sel.to - sel.from + 1} of ${months.length} months</span>
+    </div>`;
+}
+function wireMonthRange(id, months, storageKey, rerender){
+  const el = document.getElementById(id);
+  if (!el) return;
+  const fromSel = el.querySelector('[data-month-range="from"]');
+  const toSel = el.querySelector('[data-month-range="to"]');
+  const apply = (from, to) => {
+    saveMonthRange(storageKey, from === 0 && to === months.length - 1 ? null : { from: months[from].key, to: months[to].key });
+    // A different set of columns — start the table back at its left edge.
+    const card = el.closest(".forecast-table-card");
+    const scroll = card && card.querySelector(".forecast-table-scroll");
+    if (scroll) scroll.scrollLeft = 0;
+    rerender();
+  };
+  // Picking a start after the end (or an end before the start) moves the other one along.
+  fromSel.addEventListener("change", () => { const f = Number(fromSel.value); apply(f, Math.max(f, Number(toSel.value))); });
+  toSel.addEventListener("change", () => { const t = Number(toSel.value); apply(Math.min(t, Number(fromSel.value)), t); });
+  el.querySelector('[data-month-range="all"]').addEventListener("click", () => apply(0, months.length - 1));
+}
+const FORECAST_RANGE_KEY = "projectBoard.revenueForecastMonths";
+const forecastRangeMonths = () => FORECAST_MONTHS.map(m => ({ key: m, label: forecastMonthLabel(m, true) }));
 let forecastData = {}; // forecastData[lineId][month] = { locations, price }
 let forecastLines = {}; // forecastLines[projectId] = [{ id, label, sort_order }, ...] sorted by sort_order
 function linesForProject(projectId){
@@ -3995,9 +4066,10 @@ function showForecastTooltip(tooltip, card, hitRect, monthEntry){
   tooltip.style.top = (hitRectBounds.top - cardRect.top - tooltip.offsetHeight - 10) + "px";
 }
 
-function buildForecastTable(){
-  const monthHeaders = FORECAST_MONTHS.map(m => `<th colspan="2" class="forecast-month-divider">${forecastMonthLabel(m, true)}</th>`).join("");
-  const subHeaders = FORECAST_MONTHS.map(() => `<th class="forecast-month-divider">L</th><th>Price</th>`).join("");
+// months: the month columns to show (the range picked above the table).
+function buildForecastTable(months){
+  const monthHeaders = months.map(m => `<th colspan="2" class="forecast-month-divider">${forecastMonthLabel(m, true)}</th>`).join("");
+  const subHeaders = months.map(() => `<th class="forecast-month-divider">L</th><th>Price</th>`).join("");
   // Stable partition: projects with at least one line keep the standard
   // project order; 0-line projects sink to the bottom, in that same order.
   const orderedProjects = [
@@ -4016,17 +4088,18 @@ function buildForecastTable(){
             <button type="button" class="forecast-line-step-btn" data-add-line-project="${p.id}" title="Add a line">+</button>
           </span>
         </td>
-        ${FORECAST_MONTHS.map(m => {
+        ${months.map(m => {
           const revenue = projectForecastRevenue(p.id, m);
           return `<td colspan="2" class="forecast-month-divider forecast-project-revenue" title="${escapeHtmlText(p.name)} — ${forecastMonthLabel(m, true)}: lines ticked for the chart">${revenue ? formatCurrency(revenue) : ""}</td>`;
         }).join("")}
       </tr>
     `;
     const lineRows = lines.map(line => {
-      const cells = FORECAST_MONTHS.map((m, i) => {
+      const cells = months.map(m => {
         const locations = forecastValue(line.id, m, "locations");
         const price = forecastValue(line.id, m, "price");
-        const isLastMonth = i === FORECAST_MONTHS.length - 1;
+        // "Copy right" still fills every later month, shown or not — only the very last month has nothing after it.
+        const isLastMonth = m === FORECAST_MONTHS[FORECAST_MONTHS.length - 1];
         const copyBtn = isLastMonth ? "" : `<button type="button" class="forecast-copy-btn" data-copy-forecast="${line.id}" data-copy-from-month="${m}" title="Copy this month's locations &amp; price to every month after it">→</button>`;
         return `
           <td class="forecast-month-divider"><span class="forecast-cell-editable" data-edit-forecast="${line.id}" data-forecast-month="${m}" data-forecast-field="locations" data-value="${locations}">${locations || "—"}</span></td>
@@ -4051,7 +4124,7 @@ function buildForecastTable(){
   const totalRow = `
     <tr class="forecast-total-row">
       <td class="forecast-project-cell" title="Locations × price for every line ticked for the chart — the same monthly total as the chart and the EBITDA Forecasting page">Total revenue<span class="forecast-total-note">lines ticked for the chart</span></td>
-      ${FORECAST_MONTHS.map(m => `<td colspan="2" class="forecast-month-divider">${formatCurrency(totalForecastRevenue(m))}</td>`).join("")}
+      ${months.map(m => `<td colspan="2" class="forecast-month-divider">${formatCurrency(totalForecastRevenue(m))}</td>`).join("")}
     </tr>`;
   const wrap = document.createElement("div");
   wrap.innerHTML = `
@@ -4245,6 +4318,8 @@ function renderForecastingContent(){
   const prevTableScroll = document.getElementById("forecastTableScroll");
   const prevScrollLeft = prevTableScroll ? prevTableScroll.scrollLeft : 0;
   const prevScrollTop = prevTableScroll ? prevTableScroll.scrollTop : 0;
+  const rangeMonths = forecastRangeMonths();
+  const range = resolveMonthRange(FORECAST_RANGE_KEY, rangeMonths);
 
   forecastingPanel.innerHTML = `
     <div class="summary-intro">
@@ -4258,12 +4333,14 @@ function renderForecastingContent(){
     </div>
     ${revenueScenarioManager.html()}
     <div class="forecast-table-card">
+      ${monthRangeHtml("forecastMonthRange", rangeMonths, range)}
       <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll" id="forecastTableScroll"></div>
     </div>
   `;
   document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
   revenueScenarioManager.wire();
+  wireMonthRange("forecastMonthRange", rangeMonths, FORECAST_RANGE_KEY, renderForecastingContent);
 
   const cardEl = document.getElementById("forecastCard");
   const chartHolder = document.getElementById("forecastChartHolder");
@@ -4279,7 +4356,7 @@ function renderForecastingContent(){
   chartHolder.appendChild(chartEl);
   legendEl.innerHTML = legendHtml;
 
-  const tableEl = buildForecastTable();
+  const tableEl = buildForecastTable(FORECAST_MONTHS.slice(range.from, range.to + 1));
   tableScroll.appendChild(tableEl);
   pinForecastTableTop(tableEl);
 
@@ -5386,6 +5463,7 @@ async function renderBurnForecast(){
   if (currentId === "burnforecast") renderBurnForecastContent();
 }
 
+const BURN_RANGE_KEY = "projectBoard.ebitdaForecastMonths";
 function renderBurnForecastContent(){
   const p = burnForecast;
   if (!p){
@@ -5397,8 +5475,13 @@ function renderBurnForecastContent(){
     document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
     return;
   }
-  // Display columns (two per month); each points at its series in p.columns via dataIndex.
-  const cols = burnDisplayColumns(p);
+  // Display columns (two per month) within the month range picked above the
+  // table; each points at its series in p.columns via dataIndex.
+  const rangeMonths = [];
+  p.columns.forEach(c => { if (!rangeMonths.some(m => m.label === c.month)) rangeMonths.push({ key: burnMonthKey(c.month) || c.month, label: c.month }); });
+  const range = resolveMonthRange(BURN_RANGE_KEY, rangeMonths);
+  const shownMonths = new Set(rangeMonths.slice(range.from, range.to + 1).map(m => m.label));
+  const cols = burnDisplayColumns(p).filter(c => shownMonths.has(c.month));
   const kindClass = (c) => String(c.kind).toLowerCase();
   const monthStart = cols.map(c => c.monthStart);
 
@@ -5477,6 +5560,7 @@ function renderBurnForecastContent(){
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
     ${burnScenarioManager.html()}
     <div class="forecast-table-card">
+      ${monthRangeHtml("burnMonthRange", rangeMonths, range)}
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll burn-table-scroll" id="burnTableScroll">
         <table class="forecast-table burn-table">
@@ -5494,6 +5578,7 @@ function renderBurnForecastContent(){
   `;
   document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
   burnScenarioManager.wire();
+  wireMonthRange("burnMonthRange", rangeMonths, BURN_RANGE_KEY, renderBurnForecastContent);
 
   const tableScroll = document.getElementById("burnTableScroll");
   const topScrollbar = document.getElementById("burnTopScrollbar");
