@@ -4141,22 +4141,46 @@ function buildForecastTable(months){
   return wrap.firstElementChild;
 }
 
-async function saveForecastValue(lineId, month, field, value){
+// Saves one field (locations or price), leaving the month's other field as it is; throws on failure.
+async function saveForecastField(lineId, month, field, value){
   if (!forecastData[lineId]) forecastData[lineId] = {};
   if (!forecastData[lineId][month]) forecastData[lineId][month] = { locations: 0, price: 0 };
   forecastData[lineId][month][field] = value;
+  const { error } = await supabaseClient.from("project_forecasts").upsert({
+    line_id: lineId,
+    month,
+    [field]: value,
+    updated_by: authSession.user.email,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "line_id,month" });
+  if (error) throw error;
+}
+async function saveForecastValue(lineId, month, field, value){
   try {
-    const { error } = await supabaseClient.from("project_forecasts").upsert({
-      line_id: lineId,
-      month,
-      [field]: value,
-      updated_by: authSession.user.email,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "line_id,month" });
-    if (error) throw error;
+    await saveForecastField(lineId, month, field, value);
   } catch (e) {
     alert("Couldn't save — has supabase-project-forecasts.sql been run yet? (" + e.message + ")");
   }
+}
+// Saves an edited locations or price figure into its month and every later
+// month for that line, leaving the other field as it is.
+async function copyForecastFieldRight(lineId, fromMonth, field, value){
+  const fromIndex = FORECAST_MONTHS.indexOf(fromMonth);
+  const targets = FORECAST_MONTHS.slice(fromIndex);
+  const found = findForecastLine(lineId);
+  const project = found ? PROJECTS.find(p => p.id === found.projectId) : null;
+  const label = found ? `${found.line.label}${project ? " (" + project.name + ")" : ""}` : "this line";
+  const what = field === "price" ? `the price to ${formatCurrency(value)}/month` : `locations to ${value}`;
+  const confirmed = window.confirm(
+    `Set ${what} for ${label} in ${forecastMonthLabel(fromMonth, true)} and all ${targets.length - 1} month(s) after it?\n\nThis overwrites the ${field === "price" ? "price" : "locations"} already entered in those months; the ${field === "price" ? "locations stay as they are" : "price stays as it is"}.`
+  );
+  if (!confirmed){ renderForecastingContent(); return; }
+  try {
+    await Promise.all(targets.map(m => saveForecastField(lineId, m, field, value)));
+  } catch (e) {
+    alert("Couldn't copy to every month: " + e.message);
+  }
+  renderForecastingContent();
 }
 async function saveForecastPair(lineId, month, locations, price){
   if (!forecastData[lineId]) forecastData[lineId] = {};
@@ -4204,26 +4228,48 @@ function openInlineForecastEditor(el, lineId, month, field){
   input.step = field === "price" ? "0.01" : "1";
   input.className = "inline-date-input forecast-cell-input";
   input.value = el.dataset.value || "0";
+  const cell = el.parentElement;
   el.replaceWith(input);
+  // While editing, → (or Shift+Enter) saves this one figure into every later
+  // month too; the cell's own → (copy locations and price together) steps aside meanwhile.
+  const canCopy = month !== FORECAST_MONTHS[FORECAST_MONTHS.length - 1];
+  if (canCopy){
+    const pairBtn = cell && cell.querySelector("[data-copy-forecast]");
+    if (pairBtn) pairBtn.hidden = true;
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "forecast-copy-btn";
+    copyBtn.textContent = "→";
+    copyBtn.title = `Save and copy this ${field === "price" ? "price" : "number of locations"} to every later month (Shift+Enter)`;
+    copyBtn.setAttribute("aria-label", copyBtn.title);
+    // Keep focus in the input, so its blur doesn't save before the copy runs.
+    copyBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    copyBtn.addEventListener("click", (e) => { e.stopPropagation(); commit(true); });
+    input.after(copyBtn);
+  }
   input.focus();
   input.select();
   let settled = false;
-  const commit = async () => {
+  const commit = async (copyRight) => {
     if (settled) return;
     settled = true;
     const parsed = parseFloat(input.value);
     const value = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    if (copyRight){
+      await copyForecastFieldRight(lineId, month, field, value);
+      return;
+    }
     if (value !== parseFloat(el.dataset.value || "0")){
       await saveForecastValue(lineId, month, field, value);
     }
     renderForecastingContent();
   };
-  input.addEventListener("blur", commit);
+  input.addEventListener("blur", () => commit(false));
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Escape"){ settled = true; renderForecastingContent(); }
-    else if (e.key === "Enter"){ commit(); }
+    else if (e.key === "Enter"){ commit(canCopy && e.shiftKey); }
   });
 }
 function openInlineLineLabelEditor(el, lineId){
