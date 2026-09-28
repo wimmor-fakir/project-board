@@ -791,6 +791,7 @@
   .burn-mode-btn.active{ background:var(--accent); color:#fff; }
   .burn-mode-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px; }
   .burn-table td.burn-forecast{ font-style:italic; }
+  .burn-table td.burn-follows-budget{ color:var(--ink-3); }
   .burn-table td.burn-xero-partial{ text-decoration:underline dashed var(--ink-3); text-underline-offset:3px; }
   .burn-table td.burn-budget{ color:var(--ink-2); }
   .burn-table tr.burn-section-row td{ background:var(--surface-sunken); font-weight:600; color:var(--ink-2); }
@@ -5360,9 +5361,9 @@ function burnMonthKey(label){
 // Every month holds three series — Budget, Actual and Forecast — and shows
 // Budget plus one of the other two (monthModes[month]: "actual" | "forecast").
 // Older documents (the sheet's original Actual-only / Budget-only months) are
-// brought into this shape on load: missing Actuals start empty, a missing
-// Forecast starts as a copy of that month's Budget, and a month starts on
-// Actual only if it already had an Actual column. Idempotent.
+// brought into this shape on load: missing Actuals and Forecasts start empty
+// (an empty Forecast cell follows that month's Budget — see burnCellValue),
+// and a month starts on Actual only if it already had an Actual column. Idempotent.
 const BURN_KINDS = ["Budget", "Actual", "Forecast"];
 function normalizeBurnPayload(p){
   if (!p || !Array.isArray(p.columns)) return p;
@@ -5372,11 +5373,9 @@ function normalizeBurnPayload(p){
   const newCols = [];
   const source = [];
   months.forEach(m => {
-    const budgetIndex = find(m, "Budget");
     BURN_KINDS.forEach(kind => {
       newCols.push({ month: m, kind });
-      const own = find(m, kind);
-      source.push(own !== -1 ? { from: own } : kind === "Forecast" && budgetIndex !== -1 ? { from: budgetIndex } : { from: -1 });
+      source.push({ from: find(m, kind) });
     });
   });
   const unchanged = newCols.length === p.columns.length && source.every((s, i) => s.from === i);
@@ -5456,16 +5455,30 @@ function parseZarInput(raw){
   if (!isFinite(v)) return undefined;
   return neg ? -v : v;
 }
-function burnSectionSubtotal(section, col){
-  return section.accounts.filter(a => !a.excludeFromSubtotal).reduce((sum, a) => sum + (a.values[col] || 0), 0);
+// An account's figure in column col. A Forecast cell left empty follows that
+// month's Budget until someone types a forecast of their own into it.
+function burnFollowsBudget(p, a, col){
+  const c = p.columns[col];
+  return !!c && c.kind === "Forecast" && (a.values[col] === null || a.values[col] === undefined);
+}
+function burnCellValue(p, a, col){
+  if (!burnFollowsBudget(p, a, col)) return a.values[col];
+  const budgetCol = p.columns.findIndex(c => c.month === p.columns[col].month && c.kind === "Budget");
+  return budgetCol === -1 ? null : a.values[budgetCol];
+}
+// Sum of a section's accounts in column col (every account, or only those
+// counted in subtotals).
+function burnSectionSum(p, section, col, subtotalOnly){
+  return section.accounts.filter(a => !subtotalOnly || !a.excludeFromSubtotal)
+    .reduce((sum, a) => sum + (burnCellValue(p, a, col) || 0), 0);
 }
 function burnOpexTotal(p, col){
-  return p.sections.filter(s => s.inOpex).reduce((sum, s) => sum + burnSectionSubtotal(s, col), 0);
+  return p.sections.filter(s => s.inOpex).reduce((sum, s) => sum + burnSectionSum(p, s, col, true), 0);
 }
 // Opex + every account outside Opex (Cost of Sales, Depreciation, net Interest).
 function burnGrandTotal(p, col){
   return burnOpexTotal(p, col) + p.sections.filter(s => !s.inOpex)
-    .reduce((sum, s) => sum + s.accounts.reduce((acc, a) => acc + (a.values[col] || 0), 0), 0);
+    .reduce((sum, s) => sum + burnSectionSum(p, s, col, false), 0);
 }
 
 async function renderBurnForecast(){
@@ -5524,15 +5537,20 @@ function renderBurnForecastContent(){
     return `<th class="burn-kind-${mode} burn-mode-cell"><span class="burn-mode-toggle" role="group" aria-label="${escapeHtmlText(c.month)}: show Actual or Forecast">${btn("actual", "A", "Show Actual for " + escapeHtmlText(c.month))}${btn("forecast", "F", "Show Forecast for " + escapeHtmlText(c.month))}</span></th>`;
   }).join("");
   // The whole cell is the click target, not just the figure — an empty cell
-  // is only a "-", far too small to hit reliably. fn receives the data index.
-  const numCells = (fn, editable) => cols.map((c, i) => {
+  // is only a "-", far too small to hit reliably. fn receives the data index;
+  // account (for an account row) marks Forecast cells still following Budget.
+  const numCells = (fn, editable, account) => cols.map((c, i) => {
     const v = fn(c.dataIndex);
-    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${editable ? " burn-editable" : ""}`;
+    const follows = account && burnFollowsBudget(p, account, c.dataIndex);
+    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${partialClass(c)}${follows ? " burn-follows-budget" : ""}${editable ? " burn-editable" : ""}`;
+    const title = follows
+      ? `${c.month} Forecast — same as Budget until you change it. Click to enter a forecast.`
+      : `Click to edit ${c.month} ${c.kind}${c.kind === "Forecast" ? " (clear it to go back to following Budget)" : ""}`;
     return editable
-      ? `<td class="${cls}" data-burn-cell="${editable}:${c.dataIndex}" title="Click to edit ${escapeHtmlText(c.month)} ${escapeHtmlText(c.kind)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
+      ? `<td class="${cls}" data-burn-cell="${editable}:${c.dataIndex}" title="${escapeHtmlText(title)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
       : `<td class="${cls}">${formatZar(v)}</td>`;
   }).join("");
-  const sectionSum = (s, col) => s.accounts.reduce((sum, a) => sum + (a.values[col] || 0), 0);
+  const sectionSum = (s, col) => burnSectionSum(p, s, col, false);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
   // Each column gets its own revenue and burn figure: an Actual (A) column
@@ -5585,7 +5603,7 @@ function renderBurnForecastContent(){
     body += `<tr class="burn-section-row"><td class="forecast-project-cell burn-account-cell"><button type="button" class="burn-section-toggle" data-burn-toggle-section="${si}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span>${titleHtml}</span></button></td>${numCells(i => sectionSum(s, i))}</tr>`;
     if (!collapsed){
       s.accounts.forEach((a, ai) => {
-        body += `<tr><td class="forecast-project-cell burn-account-cell burn-account-name">${escapeHtmlText(a.name)}</td>${numCells(i => a.values[i], `${si}:${ai}`)}</tr>`;
+        body += `<tr><td class="forecast-project-cell burn-account-cell burn-account-name">${escapeHtmlText(a.name)}</td>${numCells(i => burnCellValue(p, a, i), `${si}:${ai}`, a)}</tr>`;
       });
     }
     if (si === lastOpexIndex){
@@ -5623,7 +5641,7 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. Click any account cell to edit it — heading and total rows recalculate automatically. ${xeroActualError
+      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. A Forecast figure is the same as Budget (shown in grey) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. ${xeroActualError
         ? `Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})`
         : `Revenue in A columns is actual Sales from Xero (accrual basis)${xeroActualRefreshedAt ? `, last refreshed ${escapeHtmlText(formatChangeTimestamp(xeroActualRefreshedAt))}` : " — none loaded yet"}; a dashed underline marks a month that's still in progress (month to date).`}${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
@@ -5863,8 +5881,8 @@ function downloadBurnScenarioCsv(s){
     rows.push([exp.grandTotalLabel || "Total expenses", ...grand]);
     const lastOpexIndex = exp.sections.reduce((last, sec, i) => (sec.inOpex ? i : last), -1);
     exp.sections.forEach((sec, si) => {
-      rows.push([sec.title, ...cols.map((c, i) => sec.accounts.reduce((sum, a) => sum + (a.values[i] || 0), 0))]);
-      sec.accounts.forEach(a => rows.push(["    " + a.name, ...cols.map((c, i) => a.values[i])]));
+      rows.push([sec.title, ...cols.map((c, i) => burnSectionSum(exp, sec, i, false))]);
+      sec.accounts.forEach(a => rows.push(["    " + a.name, ...cols.map((c, i) => burnCellValue(exp, a, i))]));
       if (si === lastOpexIndex) rows.push([exp.opexTotalLabel || "Total Operating Expenses", ...cols.map((c, i) => burnOpexTotal(exp, i))]);
     });
   } else {
@@ -5945,12 +5963,15 @@ function setBurnMonthMode(month, mode){
 }
 function openBurnCellEditor(cell){
   const [si, ai, ci] = cell.dataset.burnCell.split(":").map(Number);
-  const current = burnForecast.sections[si].accounts[ai].values[ci];
+  const account = burnForecast.sections[si].accounts[ai];
+  // A Forecast cell that still follows its Budget opens showing that Budget
+  // figure; leaving it unchanged keeps it following, clearing it goes back to following.
+  const shown = burnCellValue(burnForecast, account, ci);
   const input = document.createElement("input");
   input.type = "text";
   input.inputMode = "decimal";
   input.className = "inline-date-input forecast-cell-input";
-  input.value = current === null || current === undefined ? "" : String(current);
+  input.value = shown === null || shown === undefined ? "" : String(shown);
   cell.innerHTML = "";
   cell.appendChild(input);
   input.focus();
@@ -5963,7 +5984,7 @@ function openBurnCellEditor(cell){
     if (save && value === undefined){
       burnForecastSaveError = `Couldn't read "${input.value}" as an amount — type digits only, e.g. 90000, 90,000 or (1,500) for a negative. Nothing was changed.`;
       renderBurnForecastContent();
-    } else if (save && value !== (current === undefined ? null : current)) saveBurnForecastCell(si, ai, ci, value);
+    } else if (save && value !== (shown === undefined ? null : shown)) saveBurnForecastCell(si, ai, ci, value);
     else renderBurnForecastContent();
   };
   input.addEventListener("blur", () => finish(true));
