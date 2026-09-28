@@ -1018,8 +1018,9 @@
   .forecast-table tr.forecast-total-row td{
     font-weight:700; background:var(--success-soft); color:var(--success);
     font-family:"IBM Plex Mono",monospace; text-align:center;
+    position:sticky; top:0; z-index:2; box-shadow:0 1px 0 var(--border);
   }
-  .forecast-table tr.forecast-total-row td.forecast-project-cell{ text-align:left; font-family:inherit; }
+  .forecast-table tr.forecast-total-row td.forecast-project-cell{ text-align:left; font-family:inherit; left:0; z-index:3; }
   .forecast-table tr.forecast-total-row:hover td{ background:var(--success-soft); }
   .forecast-total-note{ display:block; font-size:10.5px; font-weight:400; color:var(--ink-3); }
   .forecast-cell-editable{ cursor:pointer; font-family:"IBM Plex Mono",monospace; }
@@ -4255,6 +4256,7 @@ function renderForecastingContent(){
 
   const tableEl = buildForecastTable();
   tableScroll.appendChild(tableEl);
+  pinForecastTableTop(tableEl);
 
   topScrollbarInner.style.width = tableScroll.scrollWidth + "px";
   tableScroll.scrollLeft = prevScrollLeft;
@@ -4273,6 +4275,17 @@ function renderForecastingContent(){
     topScrollbar.scrollLeft = tableScroll.scrollLeft;
     syncingScroll = false;
   });
+}
+// Keeps the month row, the L/Price row and the Total revenue row pinned while
+// the table scrolls, stacked one under the other (each one's "top" is the
+// combined height of the rows above it, so it has to be measured).
+function pinForecastTableTop(tableEl){
+  let offset = 0;
+  tableEl.querySelectorAll("thead tr").forEach(tr => {
+    tr.querySelectorAll("th").forEach(th => { th.style.top = offset + "px"; });
+    offset += tr.getBoundingClientRect().height;
+  });
+  tableEl.querySelectorAll("tr.forecast-total-row td").forEach(td => { td.style.top = offset + "px"; });
 }
 let forecastResizeTimer = null;
 window.addEventListener("resize", () => {
