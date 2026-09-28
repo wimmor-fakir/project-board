@@ -2021,11 +2021,11 @@ const PAGE_ACCESS_PAGES = [
   { key: "activity", label: "Activity" },
   { key: "simcards", label: "SIM Cards" },
   { key: "teamupdate", label: "Team Update" },
-  { key: "forecasting", label: "Forecasting" },
+  { key: "forecasting", label: "Revenue Forecasting" },
   { key: "goals", label: "Goals" },
   { key: "leave", label: "Leave" },
   { key: "mytasks", label: "My Tasks" },
-  { key: "burnforecast", label: "Burn Forecasting" },
+  { key: "burnforecast", label: "EBITDA Forecasting" },
 ];
 // The admin always has access to every gated page, regardless of what's
 // stored — this is a client-side convenience, not real enforcement; the
@@ -2641,8 +2641,8 @@ function renderRail(){
     forecastingTab.innerHTML = `
       <span class="tab-dot forecasting-dot"></span>
       <span class="tab-body">
-        <div class="tab-name">Forecasting</div>
-        <div class="tab-meta">Locations &amp; revenue</div>
+        <div class="tab-name">Revenue Forecasting</div>
+        <div class="tab-meta">Scenario manager</div>
       </span>
     `;
     forecastingTab.addEventListener("click", () => selectProject("forecasting"));
@@ -2659,8 +2659,8 @@ function renderRail(){
     burnTab.innerHTML = `
       <span class="tab-dot burn-dot"></span>
       <span class="tab-body">
-        <div class="tab-name">Burn Forecasting</div>
-        <div class="tab-meta">Expenses: budget vs actual</div>
+        <div class="tab-name">EBITDA Forecasting</div>
+        <div class="tab-meta">Scenario manager</div>
       </span>
     `;
     burnTab.addEventListener("click", () => selectProject("burnforecast"));
@@ -2696,7 +2696,7 @@ function renderRail(){
       <span class="tab-dot leave-dot"></span>
       <span class="tab-body">
         <div class="tab-name">Leave</div>
-        <div class="tab-meta">Coming soon</div>
+        <div class="tab-meta">Planning and visibility</div>
       </span>
     `;
     leaveTab.addEventListener("click", () => selectProject("leave"));
@@ -5266,7 +5266,7 @@ function burnGrandTotal(p, col){
 async function renderBurnForecast(){
   if (!hasPageAccess("burnforecast")) return;
   if (!supabaseClient || !authSession){
-    burnForecastPanel.innerHTML = `<p class="summary-facts">Sign in to see Burn Forecasting.</p>`;
+    burnForecastPanel.innerHTML = `<p class="summary-facts">Sign in to see EBITDA Forecasting.</p>`;
     return;
   }
   const userId = authSession.user.id;
@@ -5279,7 +5279,7 @@ async function renderBurnForecast(){
   if (!authSession || authSession.user.id !== userId) return;
   burnRevenueAvailable = revenueLoaded;
   if (error){
-    if (currentId === "burnforecast") burnForecastPanel.innerHTML = `<p class="summary-facts">Couldn't load Burn Forecasting — has supabase-burn-forecast.sql been run yet? (${escapeHtmlText(error.message)})</p>`;
+    if (currentId === "burnforecast") burnForecastPanel.innerHTML = `<p class="summary-facts">Couldn't load EBITDA Forecasting — has supabase-burn-forecast.sql been run yet? (${escapeHtmlText(error.message)})</p>`;
     return;
   }
   burnForecast = data ? data.payload : null;
@@ -5293,7 +5293,7 @@ function renderBurnForecastContent(){
   if (!p){
     burnForecastPanel.innerHTML = `
       <div class="summary-intro">
-        <p>Nothing to show yet. Either the figures haven't been loaded into the database, or the database hasn't granted your account access — ${escapeHtmlText(ADMIN_EMAIL)} ticks "Burn Forecasting" for you under Settings → User management, then sign out and back in.</p>
+        <p>Nothing to show yet. Either the figures haven't been loaded into the database, or the database hasn't granted your account access — ${escapeHtmlText(ADMIN_EMAIL)} ticks "EBITDA Forecasting" for you under Settings → User management, then sign out and back in.</p>
         <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
       </div>`;
     document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
@@ -5341,7 +5341,7 @@ function renderBurnForecastContent(){
     return `<td class="burn-${kindClass(c)}${dividerClass(i)}">${revenue === null ? "—" : formatZar(revenue)}</td>`;
   }).join("");
   let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue forecast minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue forecast − total expenses</span></td>${burnCells}</tr>`;
-  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Forecasting page</span></td>${revenueCells}</tr>`;
+  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="${burnRevenueAvailable ? "Total of every line on the Revenue Forecasting page for that month (locations × price), excluding lines unticked for its chart" : "Couldn't load the Revenue Forecasting page's data"}">Monthly revenue forecast<span class="burn-section-detail">from the Revenue Forecasting page</span></td>${revenueCells}</tr>`;
   body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
@@ -5372,7 +5372,7 @@ function renderBurnForecastContent(){
   const prevScrollLeft = prevScroll ? prevScroll.scrollLeft : 0;
   burnForecastPanel.innerHTML = `
     <div class="summary-intro">
-      <p>${escapeHtmlText(p.title || "Burn Forecasting")}</p>
+      <p>${escapeHtmlText(p.title || "EBITDA Forecasting")}</p>
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
@@ -5447,7 +5447,7 @@ function buildBurnScenariosHtml(){
     <div class="forecast-table-card burn-scenarios">
       <div class="burn-scenarios-head">
         <div class="settings-section-title">Scenarios</div>
-        <span class="burn-scenario-hint">Saves this page's expenses together with the income on the Forecasting page, date-stamped.</span>
+        <span class="burn-scenario-hint">Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped.</span>
       </div>
       <form class="mytasks-add burn-scenario-form" id="burnScenarioForm" autocomplete="off">
         <input type="text" id="burnScenarioName" maxlength="120" placeholder="Name this scenario, e.g. Base case Sep 2026" aria-label="Scenario name" value="${escapeHtmlText(burnScenarioName)}" ${burnScenarioBusy ? "disabled" : ""}>
@@ -5490,7 +5490,7 @@ async function saveBurnScenario(){
 async function reinstateBurnScenario(id){
   const s = burnScenarios.find(x => x.id === id);
   if (!s) return;
-  if (!window.confirm(`Reinstate "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})?\n\nThis replaces the expenses on this page AND every line and figure on the Forecasting page, for everyone.\n\nThe current state is saved as a scenario first, so you can undo this.`)) return;
+  if (!window.confirm(`Reinstate "${s.name}" (saved ${formatChangeTimestamp(s.created_at)})?\n\nThis replaces the expenses on this page AND every line and figure on the Revenue Forecasting page, for everyone.\n\nThe current state is saved as a scenario first, so you can undo this.`)) return;
   await withBurnScenarioBusy(async () => {
     const { error } = await supabaseClient.rpc("reinstate_burn_scenario", { p_scenario_id: id });
     if (error){ burnScenarioMessage = { text: "Couldn't reinstate the scenario: " + error.message, isError: true }; return; }
@@ -5571,7 +5571,7 @@ function downloadBurnScenarioCsv(s){
     rows.push(["(No expenses were saved in this scenario)"]);
   }
   rows.push([]);
-  rows.push(["Income (Forecasting page)", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
+  rows.push(["Income (Revenue Forecasting page)", "", "", "", ...FORECAST_MONTHS.map(m => forecastMonthLabel(m, true))]);
   rows.push(["Project", "Line", "In chart", "Measure"]);
   const projectIndex = (id) => { const i = PROJECTS.findIndex(p => p.id === id); return i === -1 ? PROJECTS.length : i; };
   const lines = [...((s.income && s.income.lines) || [])].sort((a, b) => projectIndex(a.project_id) - projectIndex(b.project_id) || (a.sort_order || 0) - (b.sort_order || 0));
@@ -6303,7 +6303,7 @@ function selectProject(id){
     document.getElementById("crumb").textContent = "Overview";
     if (enteringTeamUpdate) renderTeamUpdates();
   } else if (id === "forecasting"){
-    mainTitleEl.textContent = "Forecasting";
+    mainTitleEl.textContent = "Revenue Forecasting";
     document.getElementById("crumb").textContent = "Overview";
     if (enteringForecasting) renderForecasting();
   } else if (id === "goals"){
@@ -6323,7 +6323,7 @@ function selectProject(id){
     if (enteringMyTasks || loadedForSomeoneElse) renderMyTasks();
     else renderMyAssignedTasks();
   } else if (id === "burnforecast"){
-    mainTitleEl.textContent = "Burn Forecasting";
+    mainTitleEl.textContent = "EBITDA Forecasting";
     document.getElementById("crumb").textContent = "Overview";
     const burnLoadedForSomeoneElse = !authSession || burnForecastLoadedFor !== authSession.user.id;
     if (enteringBurnForecast || burnLoadedForSomeoneElse) renderBurnForecast();
