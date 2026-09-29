@@ -791,7 +791,7 @@
   .burn-mode-btn.active{ background:var(--accent); color:#fff; }
   .burn-mode-btn:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px; }
   .burn-table td.burn-forecast{ font-style:italic; }
-  .burn-table td.burn-follows-budget{ color:var(--ink-3); }
+  .burn-table td.burn-follows-budget{ opacity:.6; }
   .burn-table td.burn-xero-partial{ text-decoration:underline dashed var(--ink-3); text-underline-offset:3px; }
   .burn-table td.burn-budget{ color:var(--ink-2); }
   .burn-table tr.burn-section-row td{ background:var(--surface-sunken); font-weight:600; color:var(--ink-2); }
@@ -839,9 +839,14 @@
     .burn-scenario-row{ grid-template-columns:1fr; gap:4px; }
     .burn-scenario-meta{ white-space:normal; }
   }
-  .burn-notes{ margin-top:18px; font-size:12px; color:var(--ink-2); max-width:1000px; }
-  .burn-notes ol{ margin:8px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:5px; }
-  .burn-notes .burn-source{ margin-top:10px; color:var(--ink-3); }
+  .burn-scenarios-bottom .burn-scenarios{ margin:14px 0 0; }
+  /* An Actual / Forecast expense against that month's Budget: over budget red, on or under green. */
+  .burn-table tr td.burn-over-budget{ color:var(--danger); }
+  .burn-table tr td.burn-within-budget{ color:var(--success); }
+  /* Total of the months shown, at the right-hand end. */
+  .burn-table th.burn-total-col, .burn-table td.burn-total-col{ font-weight:700; border-left:2px solid var(--border-strong); }
+  .burn-table td.burn-total-col + td.burn-total-col, .burn-table th.burn-total-col + th.burn-total-col{ border-left:none; }
+  .burn-table th .burn-total-range{ display:block; font-size:10.5px; font-weight:500; color:var(--ink-3); white-space:nowrap; }
 
   /* ---------- My Tasks panel ---------- */
   .mytasks-section{ margin-bottom:26px; }
@@ -5582,21 +5587,56 @@ function renderBurnForecastContent(){
     const btn = (value, label, title) => `<button type="button" class="burn-mode-btn${mode === value ? " active" : ""}" data-burn-mode-month="${escapeHtmlText(c.month)}" data-burn-mode="${value}" aria-pressed="${mode === value}" title="${title}">${label}</button>`;
     return `<th class="burn-kind-${mode} burn-mode-cell"><span class="burn-mode-toggle" role="group" aria-label="${escapeHtmlText(c.month)}: show Actual or Forecast">${btn("actual", "A", "Show Actual for " + escapeHtmlText(c.month))}${btn("forecast", "F", "Show Forecast for " + escapeHtmlText(c.month))}</span></th>`;
   }).join("");
+  // Total of the months shown: Budget summed, next to the Actual / Forecast
+  // each month is showing, summed.
+  const shownLabels = cols.filter(c => c.monthStart).map(c => c.month);
+  const totalRange = shownLabels.length > 1 ? `${shownLabels[0]} – ${shownLabels[shownLabels.length - 1]}` : (shownLabels[0] || "");
+  const secondKinds = new Set(cols.filter(c => !c.monthStart).map(c => c.kind));
+  const totalSecond = secondKinds.size === 1 ? (secondKinds.has("Actual") ? "A" : "F") : "A/F";
+  const totalHead = `<th colspan="2" class="forecast-month-divider burn-total-col" title="Sum of the ${shownLabels.length} month${shownLabels.length === 1 ? "" : "s"} shown — change them with the month picker above">Total<span class="burn-total-range">${escapeHtmlText(totalRange)}</span></th>`;
+  const totalKindHeads = `<th class="burn-kind-budget forecast-month-divider burn-total-col" title="Budget, summed">B</th><th class="burn-total-col" title="${totalSecond === "A/F" ? "Each month's Actual or Forecast (whichever it shows), summed" : totalSecond === "A" ? "Actual, summed" : "Forecast, summed"}">${totalSecond}</th>`;
+
+  // Colours an expense's Actual / Forecast against the same month's Budget:
+  // red when it's over budget, green when it's on or under. No colour when either side is empty.
+  const vsBudgetClass = (v, b) => (v === null || v === undefined || b === null || b === undefined) ? ""
+    : Math.round(v * 100) > Math.round(b * 100) ? " burn-over-budget" : " burn-within-budget";
+  // Budget total and Actual/Forecast total of a row over the months shown.
+  // The totals are only coloured when every month with an Actual/Forecast also has a Budget.
+  const totalCells = (fn) => {
+    let b = 0, v = 0, hasB = false, hasV = false, comparable = true;
+    for (let i = 0; i + 1 < cols.length; i += 2){
+      const bv = fn(cols[i].dataIndex), vv = fn(cols[i + 1].dataIndex);
+      if (bv !== null && bv !== undefined){ b += bv; hasB = true; }
+      if (vv !== null && vv !== undefined){ v += vv; hasV = true; if (bv === null || bv === undefined) comparable = false; }
+    }
+    const vs = comparable ? vsBudgetClass(hasV ? v : null, hasB ? b : null) : "";
+    return `<td class="burn-budget forecast-month-divider burn-total-col">${formatZar(hasB ? b : null)}</td><td class="burn-total-col${vs}">${formatZar(hasV ? v : null)}</td>`;
+  };
   // The whole cell is the click target, not just the figure — an empty cell
-  // is only a "-", far too small to hit reliably. fn receives the data index;
-  // account (for an account row) marks Forecast cells still following Budget.
+  // is only a "-", far too small to hit reliably. fn receives the data index
+  // and returns null for an empty cell; account (for an account row) marks
+  // Forecast cells still following Budget. Every row built here is an expense row.
   const numCells = (fn, editable, account) => cols.map((c, i) => {
     const v = fn(c.dataIndex);
     const follows = account && burnFollowsBudget(p, account, c.dataIndex);
-    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${partialClass(c)}${follows ? " burn-follows-budget" : ""}${editable ? " burn-editable" : ""}`;
+    const vs = c.monthStart ? "" : vsBudgetClass(v, fn(cols[i - 1].dataIndex));
+    const cls = `burn-${kindClass(c)}${monthStart[i] ? " forecast-month-divider" : ""}${partialClass(c)}${vs}${follows ? " burn-follows-budget" : ""}${editable ? " burn-editable" : ""}`;
     const title = follows
       ? `${c.month} Forecast — same as Budget until you change it. Click to enter a forecast.`
       : `Click to edit ${c.month} ${c.kind}${c.kind === "Forecast" ? " (clear it to go back to following Budget)" : ""}`;
     return editable
       ? `<td class="${cls}" data-burn-cell="${editable}:${c.dataIndex}" title="${escapeHtmlText(title)}"><span class="forecast-cell-editable">${formatZar(v)}</span></td>`
       : `<td class="${cls}">${formatZar(v)}</td>`;
-  }).join("");
-  const sectionSum = (s, col) => burnSectionSum(p, s, col, false);
+  }).join("") + totalCells(fn);
+  // Sum of the given accounts in a column, or null when none of them has a figure.
+  const sumOrNull = (accounts, col) => {
+    let total = 0, any = false;
+    accounts.forEach(a => { const v = burnCellValue(p, a, col); if (v !== null && v !== undefined){ total += v; any = true; } });
+    return any ? total : null;
+  };
+  const opexAccounts = p.sections.filter(s => s.inOpex).flatMap(s => s.accounts.filter(a => !a.excludeFromSubtotal));
+  const grandAccounts = opexAccounts.concat(p.sections.filter(s => !s.inOpex).flatMap(s => s.accounts));
+  const sectionSum = (s, col) => sumOrNull(s.accounts, col);
 
   const lastOpexIndex = p.sections.reduce((last, s, i) => (s.inOpex ? i : last), -1);
   // Each column gets its own revenue and burn figure: an Actual (A) column
@@ -5618,12 +5658,27 @@ function renderBurnForecastContent(){
     return x && xeroRevenueIsPartial(key, x) ? " burn-xero-partial" : "";
   };
   const dividerClass = (i) => (monthStart[i] ? " forecast-month-divider" : "");
-  const burnCells = cols.map((c, i) => {
+  const netFor = (i) => {
     const revenue = revenueFor(i);
-    if (revenue === null) return `<td class="burn-${kindClass(c)}${dividerClass(i)}">—</td>`;
-    const net = revenue - burnGrandTotal(p, c.dataIndex);
-    return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)} ${net < 0 ? "burn-negative" : "burn-positive"}">${formatZar(net)}</td>`;
-  }).join("");
+    return revenue === null ? null : revenue - burnGrandTotal(p, cols[i].dataIndex);
+  };
+  const signClass = (n) => (n < 0 ? " burn-negative" : " burn-positive");
+  // Total cells for the Burn and revenue rows: B and Actual/Forecast sums of valueAt(display index).
+  const displayTotals = (valueAt, extraClass) => {
+    let b = null, v = null;
+    cols.forEach((c, i) => {
+      const x = valueAt(i);
+      if (x === null) return;
+      if (c.monthStart) b = (b || 0) + x; else v = (v || 0) + x;
+    });
+    const cell = (x, first) => `<td class="${first ? "burn-budget forecast-month-divider " : ""}burn-total-col${x !== null && extraClass ? extraClass(x) : ""}">${x === null ? "—" : formatZar(x)}</td>`;
+    return cell(b, true) + cell(v, false);
+  };
+  const burnCells = cols.map((c, i) => {
+    const net = netFor(i);
+    if (net === null) return `<td class="burn-${kindClass(c)}${dividerClass(i)}">—</td>`;
+    return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)}${signClass(net)}">${formatZar(net)}</td>`;
+  }).join("") + displayTotals(netFor, signClass);
   const revenueCells = cols.map((c, i) => {
     const revenue = revenueFor(i);
     let title = "";
@@ -5635,10 +5690,10 @@ function renderBurnForecastContent(){
         : `Xero Sales (accrual) for ${c.month}`;
     }
     return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)}"${title ? ` title="${escapeHtmlText(title)}"` : ""}>${revenue === null ? "—" : formatZar(revenue)}</td>`;
-  }).join("");
+  }).join("") + displayTotals(revenueFor);
   let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue − total expenses</span></td>${burnCells}</tr>`;
   body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="A (Actual) columns: that month's Sales in Xero (accrual basis). B and F columns: the Revenue Forecasting page's total for the month (locations × price), excluding lines unticked for its chart${burnRevenueAvailable ? "" : " — couldn't load that page's data"}">Monthly revenue<span class="burn-section-detail">A: actual from Xero · B / F: Revenue Forecasting</span></td>${revenueCells}</tr>`;
-  body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => burnGrandTotal(p, i))}</tr>`;
+  body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => sumOrNull(grandAccounts, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
     // A trailing "(…)" in the sheet's heading is an explanatory aside — shown small, under the name.
@@ -5653,16 +5708,9 @@ function renderBurnForecastContent(){
       });
     }
     if (si === lastOpexIndex){
-      body += `<tr class="burn-total-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.opexTotalLabel || "Total Operating Expenses")}</td>${numCells(i => burnOpexTotal(p, i))}</tr>`;
+      body += `<tr class="burn-total-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.opexTotalLabel || "Total Operating Expenses")}</td>${numCells(i => sumOrNull(opexAccounts, i))}</tr>`;
     }
   });
-
-  const notesHtml = (p.notes && p.notes.length) || p.sourceNote ? `
-    <div class="burn-notes">
-      <div class="settings-section-title">Notes</div>
-      ${p.notes && p.notes.length ? `<ol start="0">${p.notes.map(n => `<li>${escapeHtmlText(String(n).replace(/^\d+\.\s*/, ""))}</li>`).join("")}</ol>` : ""}
-      ${p.sourceNote ? `<p class="burn-source">${escapeHtmlText(p.sourceNote)}</p>` : ""}
-    </div>` : "";
 
   const prevScroll = document.getElementById("burnTableScroll");
   const prevScrollLeft = prevScroll ? prevScroll.scrollLeft : 0;
@@ -5673,25 +5721,24 @@ function renderBurnForecastContent(){
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
-    ${burnScenarioManager.html()}
     <div class="forecast-table-card">
       ${monthRangeHtml("burnMonthRange", rangeMonths, range)}
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll burn-table-scroll" id="burnTableScroll">
         <table class="forecast-table burn-table">
           <thead>
-            <tr><th rowspan="2" class="forecast-project-cell burn-account-cell">Account</th>${monthHeads.join("")}</tr>
-            <tr>${kindHeads}</tr>
+            <tr><th rowspan="2" class="forecast-project-cell burn-account-cell">Account</th>${monthHeads.join("")}${totalHead}</tr>
+            <tr>${kindHeads}${totalKindHeads}</tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. A Forecast figure is the same as Budget (shown in grey) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. While editing a Budget or Forecast cell, → (or Shift+Enter) copies the value into that row for every later month. ${xeroActualError
+      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. An Actual or Forecast expense is red when it's over that month's Budget and green when it's on or under. Total, on the right, adds up the months picked above. A Forecast figure is the same as Budget (shown faded) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. While editing a Budget or Forecast cell, → (or Shift+Enter) copies the value into that row for every later month. ${xeroActualError
         ? `Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})`
         : `Revenue in A columns is actual Sales from Xero (accrual basis)${xeroActualRefreshedAt ? `, last refreshed ${escapeHtmlText(formatChangeTimestamp(xeroActualRefreshedAt))}` : " — none loaded yet"}; a dashed underline marks a month that's still in progress (month to date).`}${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
     </div>
-    ${notesHtml}
+    <div class="burn-scenarios-bottom">${burnScenarioManager.html()}</div>
   `;
   document.getElementById("refreshBurnBtn").addEventListener("click", renderBurnForecast);
   burnScenarioManager.wire();
