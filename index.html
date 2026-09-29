@@ -840,6 +840,10 @@
     .burn-scenario-meta{ white-space:normal; }
   }
   .burn-scenarios-bottom .burn-scenarios{ margin:14px 0 0; }
+  /* Revenue Forecasting: total of the months shown, at the right-hand end. */
+  .forecast-table th.forecast-total-col, .forecast-table td.forecast-total-col{ font-weight:700; border-left:2px solid var(--border-strong); white-space:nowrap; }
+  .forecast-table th .forecast-total-range{ display:block; font-size:10.5px; font-weight:500; color:var(--ink-3); white-space:nowrap; }
+  .forecast-table td.forecast-total-excluded{ color:var(--ink-3); font-weight:500; }
   /* An Actual / Forecast expense against that month's Budget: over budget red, on or under green. */
   .burn-table tr td.burn-over-budget{ color:var(--danger); }
   .burn-table tr td.burn-within-budget{ color:var(--success); }
@@ -4077,6 +4081,13 @@ function showForecastTooltip(tooltip, card, hitRect, monthEntry){
 function buildForecastTable(months){
   const monthHeaders = months.map(m => `<th colspan="2" class="forecast-month-divider">${forecastMonthLabel(m, true)}</th>`).join("");
   const subHeaders = months.map(() => `<th class="forecast-month-divider">L</th><th>Price</th>`).join("");
+  // Total revenue over the months shown, at the right-hand end.
+  const totalRange = months.length > 1
+    ? `${forecastMonthLabel(months[0], true)} – ${forecastMonthLabel(months[months.length - 1], true)}`
+    : (months[0] ? forecastMonthLabel(months[0], true) : "");
+  const totalHeader = `<th class="forecast-month-divider forecast-total-col" title="Revenue summed over the ${months.length} month${months.length === 1 ? "" : "s"} shown — change them with the month picker above">Total<span class="forecast-total-range">${escapeHtmlText(totalRange)}</span></th>`;
+  const totalSubHeader = `<th class="forecast-month-divider forecast-total-col">Revenue</th>`;
+  const sumMonths = (fn) => months.reduce((sum, m) => sum + fn(m), 0);
   // Stable partition: projects with at least one line keep the standard
   // project order; 0-line projects sink to the bottom, in that same order.
   const orderedProjects = [
@@ -4099,6 +4110,10 @@ function buildForecastTable(months){
           const revenue = projectForecastRevenue(p.id, m);
           return `<td colspan="2" class="forecast-month-divider forecast-project-revenue" title="${escapeHtmlText(p.name)} — ${forecastMonthLabel(m, true)}: lines ticked for the chart">${revenue ? formatCurrency(revenue) : ""}</td>`;
         }).join("")}
+        ${(() => {
+          const total = sumMonths(m => projectForecastRevenue(p.id, m));
+          return `<td class="forecast-month-divider forecast-project-revenue forecast-total-col" title="${escapeHtmlText(p.name)} — ${escapeHtmlText(totalRange)}: lines ticked for the chart">${total ? formatCurrency(total) : ""}</td>`;
+        })()}
       </tr>
     `;
     const lineRows = lines.map(line => {
@@ -4114,6 +4129,8 @@ function buildForecastTable(months){
         `;
       }).join("");
       const checked = line.included_in_chart !== false;
+      const lineTotal = sumMonths(m => forecastRevenue(line.id, m));
+      const lineTotalCell = `<td class="forecast-month-divider forecast-total-col${checked ? "" : " forecast-total-excluded"}" title="${escapeHtmlText(line.label)} — ${escapeHtmlText(totalRange)}: locations × price${checked ? "" : ". Not ticked for the chart, so it's left out of the project and overall totals"}">${lineTotal ? formatCurrency(lineTotal) : "—"}</td>`;
       return `
         <tr class="forecast-line-row">
           <td class="forecast-project-cell forecast-line-cell">
@@ -4123,6 +4140,7 @@ function buildForecastTable(months){
             <span class="forecast-line-label-editable" data-edit-line-label="${line.id}">${line.label}</span>
           </td>
           ${cells}
+          ${lineTotalCell}
         </tr>
       `;
     }).join("");
@@ -4132,13 +4150,14 @@ function buildForecastTable(months){
     <tr class="forecast-total-row">
       <td class="forecast-project-cell" title="Locations × price for every line ticked for the chart — the same monthly total as the chart and the EBITDA Forecasting page">Total revenue<span class="forecast-total-note">lines ticked for the chart</span></td>
       ${months.map(m => `<td colspan="2" class="forecast-month-divider">${formatCurrency(totalForecastRevenue(m))}</td>`).join("")}
+      <td class="forecast-month-divider forecast-total-col">${formatCurrency(sumMonths(totalForecastRevenue))}</td>
     </tr>`;
   const wrap = document.createElement("div");
   wrap.innerHTML = `
     <table class="forecast-table">
       <thead>
-        <tr><th class="forecast-project-cell">Project</th>${monthHeaders}</tr>
-        <tr><th class="forecast-project-cell"></th>${subHeaders}</tr>
+        <tr><th class="forecast-project-cell">Project</th>${monthHeaders}${totalHeader}</tr>
+        <tr><th class="forecast-project-cell"></th>${subHeaders}${totalSubHeader}</tr>
       </thead>
       <tbody>${totalRow}${rows}</tbody>
     </table>
@@ -4384,12 +4403,12 @@ function renderForecastingContent(){
       <div class="forecast-legend" id="forecastLegend"></div>
       <div class="forecast-tooltip" id="forecastTooltip" hidden></div>
     </div>
-    ${revenueScenarioManager.html()}
     <div class="forecast-table-card">
       ${monthRangeHtml("forecastMonthRange", rangeMonths, range)}
       <div class="forecast-top-scrollbar" id="forecastTopScrollbar"><div class="forecast-top-scrollbar-inner" id="forecastTopScrollbarInner"></div></div>
       <div class="forecast-table-scroll" id="forecastTableScroll"></div>
     </div>
+    <div class="burn-scenarios-bottom">${revenueScenarioManager.html()}</div>
   `;
   document.getElementById("refreshForecastingBtn").addEventListener("click", renderForecasting);
   revenueScenarioManager.wire();
