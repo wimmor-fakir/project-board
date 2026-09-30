@@ -850,6 +850,9 @@
   }
   .forecast-legend-line{ flex:none; display:block; }
   .forecast-tooltip-key-line{ height:3px; width:12px; border-radius:2px; }
+  .forecast-tooltip-row-bold{ margin-top:4px; }
+  .forecast-tooltip-row-bold .forecast-tooltip-name{ color:var(--ink); font-weight:700; }
+  .forecast-tooltip-row-sub{ padding-left:15px; }
   /* Revenue Forecasting: total of the months shown, at the right-hand end. */
   .forecast-table th.forecast-total-col, .forecast-table td.forecast-total-col{ font-weight:700; border-left:2px solid var(--border-strong); white-space:nowrap; }
   .forecast-table th .forecast-total-range{ display:block; font-size:10.5px; font-weight:500; color:var(--ink-3); white-space:nowrap; }
@@ -3981,57 +3984,78 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
   });
 }
 
-// Stacked bars per month (one segment per series) with a line per ticked scenario,
-// shared by Revenue Forecasting (segments = projects) and EBITDA Forecasting
-// (segments = expense categories). months: 'YYYY-MM-01' keys; series: [{ id, name,
-// color }] already limited to those worth a legend entry; seriesValue(series, month)
-// gives a segment's value; scenarioLines[].values holds one number (or null for no
-// figure) per month. Only positive segments are stacked; every non-zero segment
-// is listed in the tooltip. A series (or line) flagged `below` holds a positive
-// amount that is drawn downward from the zero line, i.e. as a negative — EBITDA
-// Forecasting shows revenue that way, against expenses going up.
-function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, seriesValue, scenarioLines = [], emptyMessage }){
+// Bar chart per month with a line per ticked scenario, shared by Revenue Forecasting
+// (one stacked bar per month, segments = projects) and EBITDA Forecasting (three bars
+// per month: Expenses, Income, Burn). months: 'YYYY-MM-01' keys.
+//   Single bar per month: series [{ id, name, color }] (already limited to those worth a
+//   legend entry) and seriesValue(series, month) -> that segment's value.
+//   Several bars per month: bars [{ name, series, seriesValue, positiveOnly? }] instead.
+// Values are signed: positive segments stack up from the zero line, negative ones hang
+// down from it (positiveOnly leaves negatives out of the drawing — they are still listed
+// in the tooltip). scenarioLines: [{ name, color, dash, marker, slot, values }] with one
+// number (or null for no figure) per month; slot is the bar of the month the line's
+// points sit over (default the first); marker is "dot" (default), "hollow" or "square".
+function scenarioMarkerSvg(l, cx, cy, r){
+  const fill = l.marker === "hollow" ? "var(--surface)" : l.color;
+  const stroke = l.marker === "hollow" ? l.color : "var(--surface)";
+  const sw = l.marker === "hollow" ? 2 : 1.5;
+  if (l.marker === "square") return `<rect x="${(cx - r).toFixed(1)}" y="${(cy - r).toFixed(1)}" width="${(2 * r).toFixed(1)}" height="${(2 * r).toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+}
+function signedCurrency(v){
+  return v < 0 ? "−" + formatCurrency(-v) : formatCurrency(v);
+}
+function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, seriesValue, bars, scenarioLines = [], emptyMessage }){
+  const grouped = !!bars;
+  const barDefs = bars || [{ name: "", series, seriesValue }];
   const monthData = months.map((month, mi) => {
-    const listed = series.map(s => ({ ...s, value: seriesValue(s, month) })).filter(s => s.value);
-    const segments = listed.filter(s => s.value > 0 && !s.below);
-    const belowSegments = listed.filter(s => s.value > 0 && s.below);
+    const barEntries = barDefs.map(b => {
+      const listed = b.series.map(s => ({ ...s, value: b.seriesValue(s, month) })).filter(s => s.value);
+      const drawn = b.positiveOnly ? listed.filter(s => s.value > 0) : listed;
+      return {
+        name: b.name, listed,
+        up: drawn.filter(s => s.value > 0), down: drawn.filter(s => s.value < 0),
+        total: listed.reduce((sum, s) => sum + s.value, 0),
+      };
+    });
     const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] })).filter(s => s.value !== null && s.value !== undefined);
-    return {
-      month, label: /^\d{4}-\d\d-\d\d$/.test(month) ? forecastMonthLabel(month, true) : month,
-      listed, segments, belowSegments, scenarios,
-      total: listed.filter(s => !s.below).reduce((sum, s) => sum + s.value, 0),   // the tooltip's heading: everything going up
-      stacked: segments.reduce((sum, s) => sum + s.value, 0),
-      belowStacked: belowSegments.reduce((sum, s) => sum + s.value, 0),
-    };
+    return { month, label: /^\d{4}-\d\d-\d\d$/.test(month) ? forecastMonthLabel(month, true) : month, grouped, bars: barEntries, scenarios };
   });
-  const lineValues = (below) => scenarioLines.filter(l => !!l.below === below).flatMap(l => l.values.filter(v => v !== null && v !== undefined));
-  const maxUp = Math.max(1, ...monthData.map(m => m.stacked), ...lineValues(false));
-  const maxDown = Math.max(0, ...monthData.map(m => m.belowStacked), ...lineValues(true));
-  const hasBelow = maxDown > 0;
+  const sum = (items, f) => items.reduce((s, x) => s + f(x), 0);
+  const lineVals = (positive) => scenarioLines.flatMap(l => l.values.filter(v => v !== null && v !== undefined && (positive ? v > 0 : v < 0)).map(Math.abs));
+  const maxUp = Math.max(1, ...monthData.flatMap(m => m.bars.map(b => sum(b.up, s => s.value))), ...lineVals(true));
+  const maxDown = Math.max(0, ...monthData.flatMap(m => m.bars.map(b => sum(b.down, s => -s.value))), ...lineVals(false));
+  const hasNegative = maxDown > 0;
+  const allSeries = barDefs.flatMap(b => b.series);
 
-  if (!series.length && !scenarioLines.length){
+  if (!allSeries.length && !scenarioLines.length){
     const p = document.createElement("p");
     p.className = "summary-facts";
     p.textContent = emptyMessage;
     return { el: p, legendHtml: "" };
   }
 
-  const chartH = hasBelow ? 280 : 200;
-  const leftGutter = hasBelow ? 84 : 64;
+  const chartH = hasNegative ? 280 : 200;
+  const leftGutter = hasNegative ? 84 : 64;
   // Fit all months into the visible width instead of scrolling — bars get
   // narrower on a smaller window rather than overflowing (and stop getting
   // wider past a point when only a few months are shown).
   const chartW = Math.max(availableWidth - leftGutter, months.length * 8);
   const perMonth = chartW / months.length;
   const gap = Math.min(perMonth * 0.35, 18);
-  const barW = Math.min(Math.max(perMonth - gap, 6), 64);
-  const barInset = (perMonth - barW) / 2;
+  const slotGap = 2;
+  const nBars = barDefs.length;
+  const barW = nBars === 1
+    ? Math.min(Math.max(perMonth - gap, 6), 64)
+    : Math.min(Math.max((perMonth - gap - slotGap * (nBars - 1)) / nBars, 3), 36);
+  const groupInset = (perMonth - (nBars * barW + (nBars - 1) * slotGap)) / 2;
+  const slotX = (i, j) => i * perMonth + groupInset + j * (barW + slotGap);
   const radius = 4;
 
   // "Nice" axis: with nothing below zero, a ceiling and 4 gridline steps; with a
   // below-zero side, 1-2-5 steps reaching a little past the largest value each way.
   let niceStep, axisTop, axisBottom;
-  if (!hasBelow){
+  if (!hasNegative){
     const rawStep = maxUp / 4;
     const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
     niceStep = Math.ceil(rawStep / magnitude) * magnitude;
@@ -4047,46 +4071,46 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   }
   const pxPerUnit = chartH / (axisTop + axisBottom);
   const zeroY = axisTop * pxPerUnit;
-  const axisLabel = (v) => (v < 0 ? "−" + formatCurrency(-v) : formatCurrency(v));
 
   let gridlines = "";
   for (let k = -Math.round(axisBottom / niceStep); k <= Math.round(axisTop / niceStep); k++){
     const y = zeroY - k * niceStep * pxPerUnit;
-    const isZero = hasBelow && k === 0;
+    const isZero = hasNegative && k === 0;
     gridlines += `<line x1="0" y1="${y}" x2="${chartW}" y2="${y}" stroke="${isZero ? "var(--ink-3)" : "var(--chart-grid)"}" stroke-width="${isZero ? 1.5 : 1}"/>`;
-    gridlines += `<text x="-8" y="${y}" text-anchor="end" dominant-baseline="middle" class="forecast-axis-label">${axisLabel(k * niceStep)}</text>`;
+    gridlines += `<text x="-8" y="${y}" text-anchor="end" dominant-baseline="middle" class="forecast-axis-label">${signedCurrency(k * niceStep)}</text>`;
   }
 
-  let bars = "";
+  let barsSvg = "";
   monthData.forEach((m, i) => {
-    const x = i * perMonth + barInset;
-    let yCursor = zeroY;
-    m.segments.forEach((seg, si) => {
-      const segH = Math.max(seg.value * pxPerUnit - 2, 1); // 2px surface gap between segments
-      const y = yCursor - segH;
-      const isTop = si === m.segments.length - 1;
-      if (isTop){
-        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
-        if (segH > radius) bars += `<rect x="${x}" y="${y + segH - radius}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
-      } else {
-        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
-      }
-      yCursor = y - 2;
+    m.bars.forEach((b, j) => {
+      const x = slotX(i, j);
+      // Positive segments stack up from the zero line, the last one rounded at its top.
+      let yCursor = zeroY;
+      b.up.forEach((seg, si) => {
+        const segH = Math.max(seg.value * pxPerUnit - 2, 1); // 2px surface gap between segments
+        const y = yCursor - segH;
+        if (si === b.up.length - 1){
+          barsSvg += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
+          if (segH > radius) barsSvg += `<rect x="${x}" y="${y + segH - radius}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
+        } else {
+          barsSvg += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
+        }
+        yCursor = y - 2;
+      });
+      // Negative segments hang down from it, the last one rounded at its bottom.
+      let yDown = zeroY;
+      b.down.forEach((seg, si) => {
+        const segH = Math.max(-seg.value * pxPerUnit - 2, 1);
+        if (si === b.down.length - 1){
+          barsSvg += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
+          if (segH > radius) barsSvg += `<rect x="${x}" y="${yDown}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
+        } else {
+          barsSvg += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
+        }
+        yDown += segH + 2;
+      });
     });
-    // Below-zero segments hang down from the zero line, the last one rounded at its bottom.
-    let yDown = zeroY;
-    m.belowSegments.forEach((seg, si) => {
-      const segH = Math.max(seg.value * pxPerUnit - 2, 1);
-      const isEnd = si === m.belowSegments.length - 1;
-      if (isEnd){
-        bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
-        if (segH > radius) bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
-      } else {
-        bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
-      }
-      yDown += segH + 2;
-    });
-    bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${i * perMonth}" y="0" width="${perMonth}" height="${chartH}" fill="transparent"/>`;
+    barsSvg += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${i * perMonth}" y="0" width="${perMonth}" height="${chartH}" fill="transparent"/>`;
   });
 
   // Thin out month labels (rather than the bars) when the window is too
@@ -4099,17 +4123,15 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
     return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${m.label}</text>`;
   }).join("");
 
-  // One line per ticked scenario, on top of the bars. A surface-coloured
-  // outline under each keeps it readable where it crosses a bar; pointer-events
-  // are off so the month hover targets underneath still work.
+  // One line per ticked scenario, on top of the bars, its points over the bar of each
+  // month it belongs to. A surface-coloured outline under each keeps it readable where it
+  // crosses a bar; pointer-events are off so the month hover targets underneath still work.
   const lineY = (v) => zeroY - v * pxPerUnit;
   const scenarioSvg = scenarioLines.map(l => {
     // A month the scenario has no figure for is skipped (the line joins its neighbours).
-    // A `below` line is plotted as a negative.
-    const points = l.values.map((v, i) => ({ v: l.below ? -v : v, i })).filter(p => p.v !== null && p.v !== undefined && !Number.isNaN(p.v));
-    const pts = points.map(({ v, i }) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
-    // Hollow dots mark a revenue line (solid ones are expenses), so the two stay apart even in the same colour.
-    const dots = points.map(({ v, i }) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3.2" fill="${l.hollow ? "var(--surface)" : l.color}" stroke="${l.hollow ? l.color : "var(--surface)"}" stroke-width="${l.hollow ? 2 : 1.5}"/>`).join("");
+    const points = l.values.map((v, i) => ({ v, x: slotX(i, l.slot || 0) + barW / 2 })).filter(p => p.v !== null && p.v !== undefined && !Number.isNaN(p.v));
+    const pts = points.map(({ v, x }) => `${x.toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
+    const dots = points.map(({ v, x }) => scenarioMarkerSvg(l, x, lineY(v), 3.2)).join("");
     return `<g class="forecast-scenario-line" pointer-events="none">
       <polyline points="${pts}" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
       <polyline points="${pts}" fill="none" stroke="${l.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/>
@@ -4121,7 +4143,7 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   wrap.innerHTML = `
     <svg viewBox="-${leftGutter} -10 ${chartW + leftGutter} ${chartH + 36}" width="${chartW + leftGutter}" height="${chartH + 36}" class="forecast-chart-svg">
       ${gridlines}
-      ${bars}
+      ${barsSvg}
       ${scenarioSvg}
       ${labels}
     </svg>
@@ -4137,51 +4159,44 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
     hitRect.addEventListener("blur", () => { tooltipEl.hidden = true; });
   });
 
-  const legendHtml = series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")
-    + scenarioLines.map(l => `<span class="forecast-legend-item"><svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true"><line x1="1" y1="5" x2="19" y2="5" stroke="${l.color}" stroke-width="2.5" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/><circle cx="10" cy="5" r="3" fill="${l.hollow ? "var(--surface)" : l.color}" stroke="${l.hollow ? l.color : "var(--surface)"}" stroke-width="${l.hollow ? 1.8 : 1.2}"/></svg>${escapeHtmlText(l.name)}</span>`).join("");
+  const legendHtml = allSeries.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")
+    + scenarioLines.map(l => `<span class="forecast-legend-item"><svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true"><line x1="1" y1="5" x2="19" y2="5" stroke="${l.color}" stroke-width="2.5" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/>${scenarioMarkerSvg(l, 10, 5, 3)}</svg>${escapeHtmlText(l.name)}</span>`).join("");
   return { el, legendHtml };
 }
 function showForecastTooltip(tooltip, card, hitRect, monthEntry){
   const scenarioRows = monthEntry.scenarios || [];
-  if (!monthEntry.listed.length && !scenarioRows.length) { tooltip.hidden = true; return; }
+  const hasData = monthEntry.bars.some(b => b.listed.length);
+  if (!hasData && !scenarioRows.length) { tooltip.hidden = true; return; }
   tooltip.innerHTML = "";
+  const addRow = (text, valueText, { color, line, bold, indent } = {}) => {
+    const row = document.createElement("div");
+    row.className = "forecast-tooltip-row" + (bold ? " forecast-tooltip-row-bold" : "") + (indent ? " forecast-tooltip-row-sub" : "");
+    const key = document.createElement("span");
+    key.className = "forecast-tooltip-key" + (line ? " forecast-tooltip-key-line" : "");
+    if (color) key.style.background = color; else key.style.visibility = "hidden";
+    const name = document.createElement("span");
+    name.className = "forecast-tooltip-name";
+    name.textContent = text;
+    const value = document.createElement("span");
+    value.className = "forecast-tooltip-value";
+    value.textContent = valueText;
+    row.append(key, name, value);
+    tooltip.appendChild(row);
+  };
   const heading = document.createElement("div");
   heading.className = "forecast-tooltip-heading";
-  heading.textContent = monthEntry.label + (monthEntry.listed.length ? " — " + formatCurrency(monthEntry.total) : "");
+  // One bar per month: its total goes in the heading. Several: each bar gets its own row.
+  heading.textContent = monthEntry.label + (!monthEntry.grouped && hasData ? " — " + signedCurrency(monthEntry.bars[0].total) : "");
   tooltip.appendChild(heading);
-  scenarioRows.forEach(sc => {
-    const row = document.createElement("div");
-    row.className = "forecast-tooltip-row";
-    const key = document.createElement("span");
-    key.className = "forecast-tooltip-key forecast-tooltip-key-line";
-    key.style.background = sc.color;
-    const name = document.createElement("span");
-    name.className = "forecast-tooltip-name";
-    name.textContent = sc.name;
-    const value = document.createElement("span");
-    value.className = "forecast-tooltip-value";
-    value.textContent = formatCurrency(sc.value);
-    row.appendChild(key);
-    row.appendChild(name);
-    row.appendChild(value);
-    tooltip.appendChild(row);
-  });
-  [...monthEntry.listed].reverse().forEach(seg => {
-    const row = document.createElement("div");
-    row.className = "forecast-tooltip-row";
-    const key = document.createElement("span");
-    key.className = "forecast-tooltip-key";
-    key.style.background = seg.color;
-    const name = document.createElement("span");
-    name.className = "forecast-tooltip-name";
-    name.textContent = seg.name;
-    const value = document.createElement("span");
-    value.className = "forecast-tooltip-value";
-    value.textContent = formatCurrency(seg.value);
-    row.appendChild(key);
-    row.appendChild(name);
-    row.appendChild(value);
-    tooltip.appendChild(row);
+  scenarioRows.forEach(sc => addRow(sc.name, signedCurrency(sc.value), { color: sc.color, line: true }));
+  monthEntry.bars.forEach(b => {
+    if (!b.listed.length) return;
+    if (monthEntry.grouped){
+      addRow(b.name, signedCurrency(b.total), { color: b.listed.length === 1 ? b.listed[0].color : null, bold: true });
+      if (b.listed.length > 1) [...b.listed].reverse().forEach(seg => addRow(seg.name, signedCurrency(seg.value), { color: seg.color, indent: true }));
+    } else {
+      [...b.listed].reverse().forEach(seg => addRow(seg.name, signedCurrency(seg.value), { color: seg.color }));
+    }
   });
   const cardRect = card.getBoundingClientRect();
   const hitRectBounds = hitRect.getBoundingClientRect();
@@ -5887,28 +5902,20 @@ function renderBurnForecastContent(){
   burnScenarioManager.wire();
   wireMonthRange("burnMonthRange", rangeMonths, BURN_RANGE_KEY, renderBurnForecastContent);
 
-  // Chart above the table, for the same months as the table: one stacked bar per
-  // month (total expenses split by category, using whichever of Actual / Forecast
-  // that month is showing) with Revenue hanging below zero as a negative bar, and
-  // expenses + revenue lines (revenue below zero too) for each ticked scenario.
+  // Chart above the table, for the same months as the table: three bars per month —
+  // Expenses (stacked by category, using whichever of Actual / Forecast that month is
+  // showing), Income, and Burn (income minus expenses; below zero when it burns cash) —
+  // and, for each ticked scenario, lines for its expenses, income and burn over the
+  // matching bars.
   const chartMonthList = rangeMonths.slice(range.from, range.to + 1);
   const labelOfKey = {};
   chartMonthList.forEach(m => { labelOfKey[m.key] = m.label; });
+  const monthOfKey = (key) => ({ key, label: labelOfKey[key] });
   const shownColumnFor = (payload, monthLabel) => {
     const kind = payload.monthModes && payload.monthModes[monthLabel] === "actual" ? "Actual" : "Forecast";
     return payload.columns.findIndex(c => c.month === monthLabel && c.kind === kind);
   };
-  const chartSeries = p.sections.map((s, i) => ({
-    id: i,
-    name: String(s.title).replace(/\s*\(.*\)\s*$/, ""),   // drop the trailing explanatory aside
-    color: i < FORECAST_CHART_COLORS.length ? FORECAST_CHART_COLORS[i] : "var(--chart-other)",
-  }));
-  const categoryValue = (series, monthKey) => {
-    if (series.id === "__revenue") return revenueForMonth(p, null, { key: monthKey, label: labelOfKey[monthKey] }) || 0;
-    const col = shownColumnFor(p, labelOfKey[monthKey]);
-    const section = p.sections[series.id];
-    return col === -1 ? 0 : Math.round(burnSectionSum(p, section, col, section.inOpex) * 100) / 100;
-  };
+  const round2 = (v) => Math.round(v * 100) / 100;
   // Revenue for a month of a payload, the same way the table's Monthly revenue row gets it:
   // a month showing Actual takes Xero's Sales; one showing Forecast takes the revenue forecast
   // (from the scenario's own saved income, for a scenario). null when there is none.
@@ -5920,36 +5927,65 @@ function renderBurnForecastContent(){
     if (income) return incomeRevenue(income, m.key);
     return burnRevenueAvailable && FORECAST_MONTHS.includes(m.key) ? totalForecastRevenue(m.key) : null;
   };
+  // Total expenses for a month of a payload; null when the payload has no column for it.
+  const expensesForMonth = (payload, m) => {
+    const col = shownColumnFor(payload, m.label);
+    return col === -1 ? null : round2(burnGrandTotal(payload, col));
+  };
+  const burnForMonth = (payload, income, m) => {
+    const revenue = revenueForMonth(payload, income, m);
+    const expenses = expensesForMonth(payload, m);
+    return revenue === null || expenses === null ? null : round2(revenue - expenses);
+  };
+
+  const expenseSeries = p.sections.map((s, i) => ({
+    id: i,
+    name: String(s.title).replace(/\s*\(.*\)\s*$/, ""),   // drop the trailing explanatory aside
+    color: i < FORECAST_CHART_COLORS.length ? FORECAST_CHART_COLORS[i] : "var(--chart-other)",
+  }));
+  const incomeSeries = [{ id: "__income", name: "Income", color: "var(--success)" }];
+  const burnSeries = [
+    { id: "__burn_loss", name: "Burn (cash out)", color: "var(--danger)" },
+    { id: "__burn_gain", name: "Burn (cash in)", color: "var(--accent)" },
+  ];
+  const categoryValue = (series, monthKey) => {
+    const col = shownColumnFor(p, labelOfKey[monthKey]);
+    const section = p.sections[series.id];
+    return col === -1 ? 0 : round2(burnSectionSum(p, section, col, section.inOpex));
+  };
+  const incomeValue = (series, monthKey) => revenueForMonth(p, null, monthOfKey(monthKey)) || 0;
+  const burnValue = (series, monthKey) => {
+    const burn = burnForMonth(p, null, monthOfKey(monthKey));
+    if (burn === null) return 0;
+    return series.id === "__burn_loss" ? (burn < 0 ? burn : 0) : (burn > 0 ? burn : 0);
+  };
+  const anyValue = (series, valueOf) => series.filter(s => chartMonthList.some(m => valueOf(s, m.key)));
+
+  // Each ticked scenario: expenses (filled dots), income (hollow dots) and burn (squares), same
+  // colour and dash, each with its points over the bar it matches. A month the scenario has no
+  // expenses for (or with nothing entered) has no point.
   const chartLinesBurn = [];
-  // This page's own revenue is a green bar hanging below the zero line (a negative, against expenses going up).
-  chartSeries.push({ id: "__revenue", name: "Revenue", color: "var(--success)", below: true });
-  // Each ticked scenario: its total expenses (filled dots), then its revenue (hollow dots, plotted below zero
-  // like the Revenue bars), same colour and dash.
   burnScenarioManager.chartedLines().forEach(l => {
-    chartLinesBurn.push({
-      name: `${l.name} — expenses`, color: l.color, dash: l.dash,
-      // A month the scenario has no expenses for (or with nothing entered) has no point.
-      values: chartMonthList.map(m => {
-        const col = shownColumnFor(l.data.expenses, m.label);
-        if (col === -1) return null;
-        const total = burnGrandTotal(l.data.expenses, col);
-        return total ? Math.round(total * 100) / 100 : null;
-      }),
-    });
-    chartLinesBurn.push({
-      name: `${l.name} — revenue`, color: l.color, dash: l.dash, hollow: true, below: true,
-      values: chartMonthList.map(m => (shownColumnFor(l.data.expenses, m.label) === -1 ? null : revenueForMonth(l.data.expenses, l.data.income, m))),
-    });
+    const exp = l.data.expenses, inc = l.data.income;
+    const scenarioExpenses = (m) => { const v = expensesForMonth(exp, m); return v ? v : null; };
+    const scenarioIncome = (m) => (expensesForMonth(exp, m) === null ? null : revenueForMonth(exp, inc, m));
+    const scenarioBurn = (m) => (scenarioExpenses(m) === null ? null : burnForMonth(exp, inc, m));
+    chartLinesBurn.push({ name: `${l.name} — expenses`, color: l.color, dash: l.dash, slot: 0, marker: "dot", values: chartMonthList.map(scenarioExpenses) });
+    chartLinesBurn.push({ name: `${l.name} — income`, color: l.color, dash: l.dash, slot: 1, marker: "hollow", values: chartMonthList.map(scenarioIncome) });
+    chartLinesBurn.push({ name: `${l.name} — burn`, color: l.color, dash: l.dash, slot: 2, marker: "square", values: chartMonthList.map(scenarioBurn) });
   });
   const burnChart = buildStackedChart({
     availableWidth: document.getElementById("burnChartHolder").clientWidth,
     cardEl: document.getElementById("burnChartCard"),
     tooltipEl: document.getElementById("burnChartTooltip"),
     months: chartMonthList.map(m => m.key),
-    series: chartSeries.filter(s => chartMonthList.some(m => categoryValue(s, m.key))),
-    seriesValue: categoryValue,
+    bars: [
+      { name: "Expenses", series: anyValue(expenseSeries, categoryValue), seriesValue: categoryValue, positiveOnly: true },
+      { name: "Income", series: anyValue(incomeSeries, incomeValue), seriesValue: incomeValue },
+      { name: "Burn", series: anyValue(burnSeries, burnValue), seriesValue: burnValue },
+    ],
     scenarioLines: chartLinesBurn,
-    emptyMessage: "No expenses in the months shown — pick other months above the table.",
+    emptyMessage: "No expenses or income in the months shown — pick other months above the table.",
   });
   document.getElementById("burnChartHolder").appendChild(burnChart.el);
   document.getElementById("burnChartLegend").innerHTML = burnChart.legendHtml;
@@ -6294,7 +6330,7 @@ const burnScenarioManager = createScenarioManager({
   saveRpc: "save_burn_scenario",
   reinstateRpc: "reinstate_burn_scenario",
   sqlFile: "supabase-burn-scenarios.sql",
-  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its total expenses and its revenue as lines on the chart at the top.",
+  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its expenses, income and burn as lines on the chart at the top.",
   chartToggle: true,
   chartColumns: "expenses, income",
   chartWhat: "expenses",
