@@ -840,6 +840,16 @@
     .burn-scenario-meta{ white-space:normal; }
   }
   .burn-scenarios-bottom .burn-scenarios{ margin:14px 0 0; }
+  /* Revenue Forecasting: tick a saved scenario to draw it as a line on the chart. */
+  .burn-scenario-list-selectable .burn-scenario-row{ grid-template-columns:auto minmax(0,1fr) auto auto; }
+  .burn-scenario-chart-toggle{ display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .burn-scenario-chart-toggle input{ margin:0; cursor:pointer; }
+  @media (max-width: 700px){
+    .burn-scenario-list-selectable .burn-scenario-row{ grid-template-columns:auto minmax(0,1fr); }
+    .burn-scenario-list-selectable .burn-scenario-meta, .burn-scenario-list-selectable .burn-scenario-actions{ grid-column:1 / -1; }
+  }
+  .forecast-legend-line{ flex:none; display:block; }
+  .forecast-tooltip-key-line{ height:3px; width:12px; border-radius:2px; }
   /* Revenue Forecasting: total of the months shown, at the right-hand end. */
   .forecast-table th.forecast-total-col, .forecast-table td.forecast-total-col{ font-weight:700; border-left:2px solid var(--border-strong); white-space:nowrap; }
   .forecast-table th .forecast-total-range{ display:block; font-size:10.5px; font-weight:500; color:var(--ink-3); white-space:nowrap; }
@@ -3942,7 +3952,10 @@ function projectForecastRevenue(projectId, month){
 }
 
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
-function buildForecastChart(availableWidth, cardEl, tooltipEl){
+// scenarioLines: saved scenarios ticked on the Scenarios list, drawn over the
+// bars as lines — [{ name, color, dash, values }] with one total-revenue value
+// per FORECAST_MONTHS entry.
+function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = []){
   // Rank projects by total forecasted revenue over the window; past the
   // 6th, fold into "Other" rather than generating more categorical hues.
   const totals = PROJECTS.map(p => ({
@@ -3954,18 +3967,19 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl){
   const series = topProjects.map((p, i) => ({ id: p.id, name: p.name, color: FORECAST_CHART_COLORS[i] }));
   if (otherProjects.length) series.push({ id: "__other__", name: "Other projects", color: "var(--chart-other)" });
 
-  const monthData = FORECAST_MONTHS.map(month => {
+  const monthData = FORECAST_MONTHS.map((month, mi) => {
     const segments = series.map(s => ({
       ...s,
       value: s.id === "__other__"
         ? otherProjects.reduce((sum, p) => sum + projectForecastRevenue(p.id, month), 0)
         : projectForecastRevenue(s.id, month),
     })).filter(s => s.value > 0);
-    return { month, segments, total: segments.reduce((sum, s) => sum + s.value, 0) };
+    const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] }));
+    return { month, segments, scenarios, total: segments.reduce((sum, s) => sum + s.value, 0) };
   });
-  const maxTotal = Math.max(1, ...monthData.map(m => m.total));
+  const maxTotal = Math.max(1, ...monthData.map(m => m.total), ...scenarioLines.flatMap(l => l.values));
 
-  if (!totals.length){
+  if (!totals.length && !scenarioLines.length){
     const p = document.createElement("p");
     p.className = "summary-facts";
     p.textContent = "No forecasted revenue yet — add locations and a price per month below.";
@@ -4024,11 +4038,26 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl){
     return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month, true)}</text>`;
   }).join("");
 
+  // One line per ticked scenario, on top of the bars. A surface-coloured
+  // outline under each keeps it readable where it crosses a bar; pointer-events
+  // are off so the month hover targets underneath still work.
+  const lineY = (v) => chartH - (v / axisMax) * chartH;
+  const scenarioSvg = scenarioLines.map(l => {
+    const pts = l.values.map((v, i) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
+    const dots = l.values.map((v, i) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3" fill="${l.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("");
+    return `<g class="forecast-scenario-line" pointer-events="none">
+      <polyline points="${pts}" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+      <polyline points="${pts}" fill="none" stroke="${l.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/>
+      ${dots}
+    </g>`;
+  }).join("");
+
   const wrap = document.createElement("div");
   wrap.innerHTML = `
     <svg viewBox="-${leftGutter} -10 ${chartW + leftGutter} ${chartH + 36}" width="${chartW + leftGutter}" height="${chartH + 36}" class="forecast-chart-svg">
       ${gridlines}
       ${bars}
+      ${scenarioSvg}
       ${labels}
     </svg>
   `;
@@ -4043,16 +4072,35 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl){
     hitRect.addEventListener("blur", () => { tooltipEl.hidden = true; });
   });
 
-  const legendHtml = series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("");
+  const legendHtml = series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")
+    + scenarioLines.map(l => `<span class="forecast-legend-item"><svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true"><line x1="1" y1="5" x2="19" y2="5" stroke="${l.color}" stroke-width="2.5" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/></svg>${escapeHtmlText(l.name)}</span>`).join("");
   return { el, legendHtml };
 }
 function showForecastTooltip(tooltip, card, hitRect, monthEntry){
-  if (!monthEntry.segments.length) { tooltip.hidden = true; return; }
+  const scenarioRows = monthEntry.scenarios || [];
+  if (!monthEntry.segments.length && !scenarioRows.length) { tooltip.hidden = true; return; }
   tooltip.innerHTML = "";
   const heading = document.createElement("div");
   heading.className = "forecast-tooltip-heading";
-  heading.textContent = forecastMonthLabel(monthEntry.month, true) + " — " + formatCurrency(monthEntry.total);
+  heading.textContent = forecastMonthLabel(monthEntry.month, true) + (monthEntry.segments.length ? " — " + formatCurrency(monthEntry.total) : "");
   tooltip.appendChild(heading);
+  scenarioRows.forEach(sc => {
+    const row = document.createElement("div");
+    row.className = "forecast-tooltip-row";
+    const key = document.createElement("span");
+    key.className = "forecast-tooltip-key forecast-tooltip-key-line";
+    key.style.background = sc.color;
+    const name = document.createElement("span");
+    name.className = "forecast-tooltip-name";
+    name.textContent = sc.name;
+    const value = document.createElement("span");
+    value.className = "forecast-tooltip-value";
+    value.textContent = formatCurrency(sc.value);
+    row.appendChild(key);
+    row.appendChild(name);
+    row.appendChild(value);
+    tooltip.appendChild(row);
+  });
   [...monthEntry.segments].reverse().forEach(seg => {
     const row = document.createElement("div");
     row.className = "forecast-tooltip-row";
@@ -4424,7 +4472,11 @@ function renderForecastingContent(){
 
   // The chart fits itself to the visible width (no horizontal scroll); only
   // the table scrolls, via a scrollbar placed above it instead of below.
-  const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl);
+  const scenarioLines = revenueScenarioManager.chartedLines().map(l => ({
+    name: l.name, color: l.color, dash: l.dash,
+    values: FORECAST_MONTHS.map(m => incomeRevenue(l.income, m)),
+  }));
+  const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl, scenarioLines);
   chartHolder.appendChild(chartEl);
   legendEl.innerHTML = legendHtml;
 
@@ -5788,15 +5840,68 @@ window.addEventListener("resize", syncBurnTopScrollbarWidth);
 // reinstating run as database functions (see supabase-burn-scenarios.sql and
 // supabase-revenue-scenarios.sql) so each is one all-or-nothing step, and a
 // reinstate always auto-saves the current state first.
+// Line styles for scenarios drawn on the Revenue Forecasting chart (cfg.chartToggle):
+// colour + dash pattern together, so lines stay apart without relying on colour alone.
+const SCENARIO_LINE_STYLES = [
+  { color: "var(--ink)", dash: "" },
+  { color: "var(--danger)", dash: "7 4" },
+  { color: "var(--accent)", dash: "2 4" },
+  { color: "var(--warning)", dash: "10 3 2 3" },
+  { color: "var(--success)", dash: "5 3" },
+];
 function createScenarioManager(cfg){
-  const state = { list: [], error: null, name: "", message: null, busy: false };
+  const state = { list: [], error: null, name: "", message: null, busy: false, charted: new Set(), incomes: {} };
   const ids = { form: cfg.key + "ScenarioForm", name: cfg.key + "ScenarioName", current: cfg.key + "DownloadCurrent" };
   const disabled = () => (state.busy ? "disabled" : "");
+  // Scenarios ticked to show as lines on the chart (only when cfg.chartToggle).
+  // The ticks are a per-viewer view setting, remembered in this browser only.
+  const chartKey = "projectBoard." + cfg.key + "ScenarioChart";
+  if (cfg.chartToggle){
+    try { state.charted = new Set(JSON.parse(localStorage.getItem(chartKey) || "[]")); } catch (e) {}
+  }
+  function saveCharted(){
+    try { localStorage.setItem(chartKey, JSON.stringify([...state.charted])); } catch (e) {}
+  }
+  // Fetches the income of ticked scenarios not fetched yet (a saved scenario never changes, so it's cached).
+  async function ensureIncomes(){
+    const missing = [...state.charted].filter(id => !state.incomes[id] && state.list.some(s => s.id === id));
+    if (!missing.length) return;
+    const { data, error } = await supabaseClient.from(cfg.table).select("id, income").in("id", missing);
+    if (error){ state.message = { text: "Couldn't load a scenario for the chart: " + error.message, isError: true }; return; }
+    (data || []).forEach(r => { state.incomes[r.id] = r.income; });
+  }
+  // Line style for a scenario: fixed by its place in the oldest-first list, so ticking others never recolours it.
+  function lineStyle(id){
+    const i = state.list.slice().reverse().findIndex(s => s.id === id);
+    return SCENARIO_LINE_STYLES[Math.max(i, 0) % SCENARIO_LINE_STYLES.length];
+  }
+  // The ticked scenarios ready to draw: [{ id, name, income, color, dash }], newest first as listed.
+  function chartedLines(){
+    return state.list.filter(s => state.charted.has(s.id) && state.incomes[s.id])
+      .map(s => ({ id: s.id, name: s.name, income: state.incomes[s.id], ...lineStyle(s.id) }));
+  }
+  async function toggleCharted(id, on){
+    if (on) state.charted.add(id); else state.charted.delete(id);
+    saveCharted();
+    cfg.rerender();
+    if (on && !state.incomes[id]){
+      await ensureIncomes();
+      if (!state.incomes[id]){ state.charted.delete(id); saveCharted(); }   // couldn't load it: untick again
+      if (currentId === cfg.pageId) cfg.rerender();
+    }
+  }
   async function load(){
     const { data, error } = await supabaseClient.from(cfg.table)
       .select("id, name, created_at, created_by").order("created_at", { ascending: false });
     state.error = error ? error.message : null;
     state.list = error ? [] : (data || []);
+    if (cfg.chartToggle && !error){
+      // Drop ticks for scenarios that no longer exist, then fetch what the chart needs.
+      const before = state.charted.size;
+      state.charted = new Set([...state.charted].filter(id => state.list.some(s => s.id === id)));
+      if (state.charted.size !== before) saveCharted();
+      await ensureIncomes();
+    }
   }
   function html(){
     const msg = state.message
@@ -5807,8 +5912,18 @@ function createScenarioManager(cfg){
     } else if (!state.list.length){
       list = `<p class="burn-scenario-empty">No saved scenarios yet.</p>`;
     } else {
-      list = `<div class="burn-scenario-list">${state.list.map(s => `
+      const chartBox = (s) => {
+        if (!cfg.chartToggle) return "";
+        const on = state.charted.has(s.id);
+        const st = lineStyle(s.id);
+        return `<label class="burn-scenario-chart-toggle" title="Show this scenario as a line on the chart at the top of the page">
+            <input type="checkbox" data-scenario-chart="${s.id}" ${on ? "checked" : ""} aria-label="Show ${escapeHtmlText(s.name)} on the chart">
+            <svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true" style="opacity:${on ? 1 : .35}"><line x1="1" y1="5" x2="19" y2="5" stroke="${st.color}" stroke-width="2.5" stroke-linecap="round"${st.dash ? ` stroke-dasharray="${st.dash}"` : ""}/></svg>
+          </label>`;
+      };
+      list = `<div class="burn-scenario-list${cfg.chartToggle ? " burn-scenario-list-selectable" : ""}">${state.list.map(s => `
         <div class="burn-scenario-row">
+          ${chartBox(s)}
           <div class="burn-scenario-name">${escapeHtmlText(s.name)}</div>
           <div class="burn-scenario-meta">${escapeHtmlText(formatChangeTimestamp(s.created_at))}${s.created_by ? ` · ${escapeHtmlText(s.created_by)}` : ""}</div>
           <div class="burn-scenario-actions">
@@ -5836,6 +5951,9 @@ function createScenarioManager(cfg){
   function wire(){
     const form = document.getElementById(ids.form);
     if (!form) return;
+    form.closest(".burn-scenarios").querySelectorAll("[data-scenario-chart]").forEach(box => {
+      box.addEventListener("change", () => toggleCharted(box.dataset.scenarioChart, box.checked));
+    });
     const nameInput = document.getElementById(ids.name);
     nameInput.addEventListener("input", () => { state.name = nameInput.value; });
     form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
@@ -5911,8 +6029,9 @@ function createScenarioManager(cfg){
     state.error = null;
     state.message = null;
     state.busy = false;
+    state.incomes = {};
   }
-  return { load, html, wire, handleClick, reset };
+  return { load, html, wire, handleClick, reset, chartedLines };
 }
 
 // The Forecasting data currently in memory, in the same shape a saved scenario uses.
@@ -6034,7 +6153,8 @@ const revenueScenarioManager = createScenarioManager({
   saveRpc: "save_revenue_scenario",
   reinstateRpc: "reinstate_revenue_scenario",
   sqlFile: "supabase-revenue-scenarios.sql",
-  hint: "Saves every line and its monthly locations and price on this page, date-stamped.",
+  hint: "Saves every line and its monthly locations and price on this page, date-stamped. Tick a scenario to draw its monthly total as a line on the chart at the top.",
+  chartToggle: true,
   reinstateWarning: "This replaces every line and figure on this page, for everyone — the revenue on the EBITDA Forecasting page follows it too.",
   rerender: () => renderForecastingContent(),
   afterReinstate: () => renderForecasting(),
