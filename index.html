@@ -3973,20 +3973,34 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
     : projectForecastRevenue(s.id, month);
   // Only projects with revenue in the months shown get a legend entry.
   const series = allSeries.filter(s => months.some(m => seriesValue(s, m) > 0));
-
-  const monthData = months.map((month, mi) => {
-    const segments = series.map(s => ({ ...s, value: seriesValue(s, month) })).filter(s => s.value > 0);
-    const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] }));
-    return { month, segments, scenarios, total: segments.reduce((sum, s) => sum + s.value, 0) };
+  return buildStackedChart({
+    availableWidth, cardEl, tooltipEl, months, series, seriesValue, scenarioLines,
+    emptyMessage: totals.length
+      ? "No forecasted revenue in the months shown — pick other months above the table."
+      : "No forecasted revenue yet — add locations and a price per month below.",
   });
-  const maxTotal = Math.max(1, ...monthData.map(m => m.total), ...scenarioLines.flatMap(l => l.values));
+}
+
+// Stacked bars per month (one segment per series) with a line per ticked scenario,
+// shared by Revenue Forecasting (segments = projects) and EBITDA Forecasting
+// (segments = expense categories). months: 'YYYY-MM-01' keys; series: [{ id, name,
+// color }] already limited to those worth a legend entry; seriesValue(series, month)
+// gives a segment's value; scenarioLines[].values holds one number (or null for no
+// figure) per month. Only positive segments are stacked; every non-zero segment
+// is listed in the tooltip.
+function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, seriesValue, scenarioLines = [], emptyMessage }){
+  const monthData = months.map((month, mi) => {
+    const listed = series.map(s => ({ ...s, value: seriesValue(s, month) })).filter(s => s.value);
+    const segments = listed.filter(s => s.value > 0);
+    const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] })).filter(s => s.value !== null && s.value !== undefined);
+    return { month, label: /^\d{4}-\d\d-\d\d$/.test(month) ? forecastMonthLabel(month, true) : month, listed, segments, scenarios, total: listed.reduce((sum, s) => sum + s.value, 0), stacked: segments.reduce((sum, s) => sum + s.value, 0) };
+  });
+  const maxTotal = Math.max(1, ...monthData.map(m => m.stacked), ...scenarioLines.flatMap(l => l.values.filter(v => v !== null && v !== undefined)));
 
   if (!series.length && !scenarioLines.length){
     const p = document.createElement("p");
     p.className = "summary-facts";
-    p.textContent = totals.length
-      ? "No forecasted revenue in the months shown — pick other months above the table."
-      : "No forecasted revenue yet — add locations and a price per month below.";
+    p.textContent = emptyMessage;
     return { el: p, legendHtml: "" };
   }
 
@@ -4041,7 +4055,7 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
   const labels = monthData.map((m, i) => {
     if (i % labelStride !== 0) return "";
     const x = i * perMonth + perMonth / 2;
-    return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${forecastMonthLabel(m.month, true)}</text>`;
+    return `<text x="${x}" y="${chartH + 18}" text-anchor="middle" class="forecast-axis-label">${m.label}</text>`;
   }).join("");
 
   // One line per ticked scenario, on top of the bars. A surface-coloured
@@ -4049,8 +4063,10 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
   // are off so the month hover targets underneath still work.
   const lineY = (v) => chartH - (v / axisMax) * chartH;
   const scenarioSvg = scenarioLines.map(l => {
-    const pts = l.values.map((v, i) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
-    const dots = l.values.map((v, i) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3" fill="${l.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("");
+    // A month the scenario has no figure for is skipped (the line joins its neighbours).
+    const points = l.values.map((v, i) => ({ v, i })).filter(p => p.v !== null && p.v !== undefined);
+    const pts = points.map(({ v, i }) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
+    const dots = points.map(({ v, i }) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3" fill="${l.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("");
     return `<g class="forecast-scenario-line" pointer-events="none">
       <polyline points="${pts}" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
       <polyline points="${pts}" fill="none" stroke="${l.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/>
@@ -4084,11 +4100,11 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
 }
 function showForecastTooltip(tooltip, card, hitRect, monthEntry){
   const scenarioRows = monthEntry.scenarios || [];
-  if (!monthEntry.segments.length && !scenarioRows.length) { tooltip.hidden = true; return; }
+  if (!monthEntry.listed.length && !scenarioRows.length) { tooltip.hidden = true; return; }
   tooltip.innerHTML = "";
   const heading = document.createElement("div");
   heading.className = "forecast-tooltip-heading";
-  heading.textContent = forecastMonthLabel(monthEntry.month, true) + (monthEntry.segments.length ? " — " + formatCurrency(monthEntry.total) : "");
+  heading.textContent = monthEntry.label + (monthEntry.listed.length ? " — " + formatCurrency(monthEntry.total) : "");
   tooltip.appendChild(heading);
   scenarioRows.forEach(sc => {
     const row = document.createElement("div");
@@ -4107,7 +4123,7 @@ function showForecastTooltip(tooltip, card, hitRect, monthEntry){
     row.appendChild(value);
     tooltip.appendChild(row);
   });
-  [...monthEntry.segments].reverse().forEach(seg => {
+  [...monthEntry.listed].reverse().forEach(seg => {
     const row = document.createElement("div");
     row.className = "forecast-tooltip-row";
     const key = document.createElement("span");
@@ -4482,7 +4498,7 @@ function renderForecastingContent(){
   const shownMonths = FORECAST_MONTHS.slice(range.from, range.to + 1);
   const scenarioLines = revenueScenarioManager.chartedLines().map(l => ({
     name: l.name, color: l.color, dash: l.dash,
-    values: shownMonths.map(m => incomeRevenue(l.income, m)),
+    values: shownMonths.map(m => incomeRevenue(l.data, m)),
   }));
   const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl, scenarioLines, shownMonths);
   chartHolder.appendChild(chartEl);
@@ -5800,6 +5816,11 @@ function renderBurnForecastContent(){
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
     ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
+    <div class="forecast-card" id="burnChartCard">
+      <div id="burnChartHolder"></div>
+      <div class="forecast-legend" id="burnChartLegend"></div>
+      <div class="forecast-tooltip" id="burnChartTooltip" hidden></div>
+    </div>
     <div class="forecast-table-card">
       ${monthRangeHtml("burnMonthRange", rangeMonths, range)}
       <div class="forecast-top-scrollbar" id="burnTopScrollbar"><div class="forecast-top-scrollbar-inner" id="burnTopScrollbarInner"></div></div>
@@ -5823,6 +5844,49 @@ function renderBurnForecastContent(){
   burnScenarioManager.wire();
   wireMonthRange("burnMonthRange", rangeMonths, BURN_RANGE_KEY, renderBurnForecastContent);
 
+  // Chart above the table, for the same months as the table: one stacked bar per
+  // month (total expenses split by category, using whichever of Actual / Forecast
+  // that month is showing), plus a line for each ticked scenario's total expenses.
+  const chartMonthList = rangeMonths.slice(range.from, range.to + 1);
+  const labelOfKey = {};
+  chartMonthList.forEach(m => { labelOfKey[m.key] = m.label; });
+  const shownColumnFor = (payload, monthLabel) => {
+    const kind = payload.monthModes && payload.monthModes[monthLabel] === "actual" ? "Actual" : "Forecast";
+    return payload.columns.findIndex(c => c.month === monthLabel && c.kind === kind);
+  };
+  const chartSeries = p.sections.map((s, i) => ({
+    id: i,
+    name: String(s.title).replace(/\s*\(.*\)\s*$/, ""),   // drop the trailing explanatory aside
+    color: i < FORECAST_CHART_COLORS.length ? FORECAST_CHART_COLORS[i] : "var(--chart-other)",
+  }));
+  const categoryValue = (series, monthKey) => {
+    const col = shownColumnFor(p, labelOfKey[monthKey]);
+    const section = p.sections[series.id];
+    return col === -1 ? 0 : Math.round(burnSectionSum(p, section, col, section.inOpex) * 100) / 100;
+  };
+  const scenarioLinesBurn = burnScenarioManager.chartedLines().map(l => ({
+    name: l.name, color: l.color, dash: l.dash,
+    // A month the scenario has no expenses for (or with nothing entered) has no point.
+    values: chartMonthList.map(m => {
+      const col = shownColumnFor(l.data, m.label);
+      if (col === -1) return null;
+      const total = burnGrandTotal(l.data, col);
+      return total ? Math.round(total * 100) / 100 : null;
+    }),
+  }));
+  const burnChart = buildStackedChart({
+    availableWidth: document.getElementById("burnChartHolder").clientWidth,
+    cardEl: document.getElementById("burnChartCard"),
+    tooltipEl: document.getElementById("burnChartTooltip"),
+    months: chartMonthList.map(m => m.key),
+    series: chartSeries.filter(s => chartMonthList.some(m => categoryValue(s, m.key))),
+    seriesValue: categoryValue,
+    scenarioLines: scenarioLinesBurn,
+    emptyMessage: "No expenses in the months shown — pick other months above the table.",
+  });
+  document.getElementById("burnChartHolder").appendChild(burnChart.el);
+  document.getElementById("burnChartLegend").innerHTML = burnChart.legendHtml;
+
   const tableScroll = document.getElementById("burnTableScroll");
   const topScrollbar = document.getElementById("burnTopScrollbar");
   pinTableTop(tableScroll.querySelector("table"), "tbody tr.burn-net-row, tbody tr.burn-revenue-row, tbody tr.burn-grand-row");
@@ -5841,6 +5905,13 @@ function syncBurnTopScrollbarWidth(){
   if (tableScroll && inner) inner.style.width = tableScroll.scrollWidth + "px";
 }
 window.addEventListener("resize", syncBurnTopScrollbarWidth);
+// The chart fits itself to the page width, so redraw it when the window is resized.
+let burnResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (currentId !== "burnforecast" || !burnForecast) return;
+  clearTimeout(burnResizeTimer);
+  burnResizeTimer = setTimeout(renderBurnForecastContent, 150);
+});
 
 /* ---------- Scenarios (EBITDA Forecasting + Revenue Forecasting) ---------- */
 // One scenario manager per page. A saved scenario is a named, date-stamped
@@ -5858,7 +5929,9 @@ const SCENARIO_LINE_STYLES = [
   { color: "var(--success)", dash: "5 3" },
 ];
 function createScenarioManager(cfg){
-  const state = { list: [], error: null, name: "", message: null, busy: false, charted: new Set(), incomes: {} };
+  // chartData[id]: what the chart needs from a ticked scenario (its cfg.chartColumn, run through
+  // cfg.chartPrepare); present once fetched, null when the scenario has nothing to draw.
+  const state = { list: [], error: null, name: "", message: null, busy: false, charted: new Set(), chartData: {} };
   const ids = { form: cfg.key + "ScenarioForm", name: cfg.key + "ScenarioName", current: cfg.key + "DownloadCurrent" };
   const disabled = () => (state.busy ? "disabled" : "");
   // Scenarios ticked to show as lines on the chart (only when cfg.chartToggle).
@@ -5870,31 +5943,36 @@ function createScenarioManager(cfg){
   function saveCharted(){
     try { localStorage.setItem(chartKey, JSON.stringify([...state.charted])); } catch (e) {}
   }
-  // Fetches the income of ticked scenarios not fetched yet (a saved scenario never changes, so it's cached).
-  async function ensureIncomes(){
-    const missing = [...state.charted].filter(id => !state.incomes[id] && state.list.some(s => s.id === id));
+  // Fetches what the chart needs from ticked scenarios not fetched yet (a saved scenario never changes, so it's cached).
+  async function ensureChartData(){
+    const missing = [...state.charted].filter(id => !(id in state.chartData) && state.list.some(s => s.id === id));
     if (!missing.length) return;
-    const { data, error } = await supabaseClient.from(cfg.table).select("id, income").in("id", missing);
+    const column = cfg.chartColumn || "income";
+    const { data, error } = await supabaseClient.from(cfg.table).select("id, " + column).in("id", missing);
     if (error){ state.message = { text: "Couldn't load a scenario for the chart: " + error.message, isError: true }; return; }
-    (data || []).forEach(r => { state.incomes[r.id] = r.income; });
+    (data || []).forEach(r => { state.chartData[r.id] = r[column] ? (cfg.chartPrepare ? cfg.chartPrepare(r[column]) : r[column]) : null; });
   }
   // Line style for a scenario: fixed by its place in the oldest-first list, so ticking others never recolours it.
   function lineStyle(id){
     const i = state.list.slice().reverse().findIndex(s => s.id === id);
     return SCENARIO_LINE_STYLES[Math.max(i, 0) % SCENARIO_LINE_STYLES.length];
   }
-  // The ticked scenarios ready to draw: [{ id, name, income, color, dash }], newest first as listed.
+  // The ticked scenarios ready to draw: [{ id, name, data, color, dash }], newest first as listed.
   function chartedLines(){
-    return state.list.filter(s => state.charted.has(s.id) && state.incomes[s.id])
-      .map(s => ({ id: s.id, name: s.name, income: state.incomes[s.id], ...lineStyle(s.id) }));
+    return state.list.filter(s => state.charted.has(s.id) && state.chartData[s.id])
+      .map(s => ({ id: s.id, name: s.name, data: state.chartData[s.id], ...lineStyle(s.id) }));
   }
   async function toggleCharted(id, on){
     if (on) state.charted.add(id); else state.charted.delete(id);
     saveCharted();
     cfg.rerender();
-    if (on && !state.incomes[id]){
-      await ensureIncomes();
-      if (!state.incomes[id]){ state.charted.delete(id); saveCharted(); }   // couldn't load it: untick again
+    if (on && !(id in state.chartData)){
+      await ensureChartData();
+      if (!state.chartData[id]){   // couldn't load it, or it has nothing to draw: untick again
+        state.charted.delete(id);
+        saveCharted();
+        if (id in state.chartData) state.message = { text: `"${(state.list.find(s => s.id === id) || {}).name}" has no ${cfg.chartWhat || "data"} saved, so there's nothing to draw.`, isError: true };
+      }
       if (currentId === cfg.pageId) cfg.rerender();
     }
   }
@@ -5908,7 +5986,10 @@ function createScenarioManager(cfg){
       const before = state.charted.size;
       state.charted = new Set([...state.charted].filter(id => state.list.some(s => s.id === id)));
       if (state.charted.size !== before) saveCharted();
-      await ensureIncomes();
+      await ensureChartData();
+      // A ticked scenario with nothing to draw (no expenses saved) is unticked again.
+      const empty = [...state.charted].filter(id => id in state.chartData && !state.chartData[id]);
+      if (empty.length){ empty.forEach(id => state.charted.delete(id)); saveCharted(); }
     }
   }
   function html(){
@@ -6037,7 +6118,7 @@ function createScenarioManager(cfg){
     state.error = null;
     state.message = null;
     state.busy = false;
-    state.incomes = {};
+    state.chartData = {};
   }
   return { load, html, wire, handleClick, reset, chartedLines };
 }
@@ -6147,7 +6228,11 @@ const burnScenarioManager = createScenarioManager({
   saveRpc: "save_burn_scenario",
   reinstateRpc: "reinstate_burn_scenario",
   sqlFile: "supabase-burn-scenarios.sql",
-  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped.",
+  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its total expenses as a line on the chart at the top.",
+  chartToggle: true,
+  chartColumn: "expenses",
+  chartWhat: "expenses",
+  chartPrepare: (expenses) => normalizeBurnPayload(JSON.parse(JSON.stringify(expenses))),
   reinstateWarning: "This replaces the expenses on this page AND every line and figure on the Revenue Forecasting page, for everyone.",
   rerender: () => renderBurnForecastContent(),
   afterReinstate: () => renderBurnForecast(),
