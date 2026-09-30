@@ -4066,7 +4066,8 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
     // A month the scenario has no figure for is skipped (the line joins its neighbours).
     const points = l.values.map((v, i) => ({ v, i })).filter(p => p.v !== null && p.v !== undefined);
     const pts = points.map(({ v, i }) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
-    const dots = points.map(({ v, i }) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3" fill="${l.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("");
+    // Hollow dots mark a revenue line (solid ones are expenses), so the two stay apart even in the same colour.
+    const dots = points.map(({ v, i }) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3.2" fill="${l.hollow ? "var(--surface)" : l.color}" stroke="${l.hollow ? l.color : "var(--surface)"}" stroke-width="${l.hollow ? 2 : 1.5}"/>`).join("");
     return `<g class="forecast-scenario-line" pointer-events="none">
       <polyline points="${pts}" fill="none" stroke="var(--surface)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
       <polyline points="${pts}" fill="none" stroke="${l.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/>
@@ -4095,7 +4096,7 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   });
 
   const legendHtml = series.map(s => `<span class="forecast-legend-item"><span class="forecast-legend-swatch" style="background:${s.color}"></span>${s.name}</span>`).join("")
-    + scenarioLines.map(l => `<span class="forecast-legend-item"><svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true"><line x1="1" y1="5" x2="19" y2="5" stroke="${l.color}" stroke-width="2.5" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/></svg>${escapeHtmlText(l.name)}</span>`).join("");
+    + scenarioLines.map(l => `<span class="forecast-legend-item"><svg class="forecast-legend-line" width="20" height="10" viewBox="0 0 20 10" aria-hidden="true"><line x1="1" y1="5" x2="19" y2="5" stroke="${l.color}" stroke-width="2.5" stroke-linecap="round"${l.dash ? ` stroke-dasharray="${l.dash}"` : ""}/><circle cx="10" cy="5" r="3" fill="${l.hollow ? "var(--surface)" : l.color}" stroke="${l.hollow ? l.color : "var(--surface)"}" stroke-width="${l.hollow ? 1.8 : 1.2}"/></svg>${escapeHtmlText(l.name)}</span>`).join("");
   return { el, legendHtml };
 }
 function showForecastTooltip(tooltip, card, hitRect, monthEntry){
@@ -5846,7 +5847,7 @@ function renderBurnForecastContent(){
 
   // Chart above the table, for the same months as the table: one stacked bar per
   // month (total expenses split by category, using whichever of Actual / Forecast
-  // that month is showing), plus a line for each ticked scenario's total expenses.
+  // that month is showing), a Revenue line, and expenses + revenue lines for each ticked scenario.
   const chartMonthList = rangeMonths.slice(range.from, range.to + 1);
   const labelOfKey = {};
   chartMonthList.forEach(m => { labelOfKey[m.key] = m.label; });
@@ -5864,16 +5865,40 @@ function renderBurnForecastContent(){
     const section = p.sections[series.id];
     return col === -1 ? 0 : Math.round(burnSectionSum(p, section, col, section.inOpex) * 100) / 100;
   };
-  const scenarioLinesBurn = burnScenarioManager.chartedLines().map(l => ({
-    name: l.name, color: l.color, dash: l.dash,
-    // A month the scenario has no expenses for (or with nothing entered) has no point.
-    values: chartMonthList.map(m => {
-      const col = shownColumnFor(l.data, m.label);
-      if (col === -1) return null;
-      const total = burnGrandTotal(l.data, col);
-      return total ? Math.round(total * 100) / 100 : null;
-    }),
-  }));
+  // Revenue for a month of a payload, the same way the table's Monthly revenue row gets it:
+  // a month showing Actual takes Xero's Sales; one showing Forecast takes the revenue forecast
+  // (from the scenario's own saved income, for a scenario). null when there is none.
+  const revenueForMonth = (payload, income, m) => {
+    if (payload.monthModes && payload.monthModes[m.label] === "actual"){
+      const x = xeroRevenueFor(m.key);
+      return x ? x.revenue : null;
+    }
+    if (income) return incomeRevenue(income, m.key);
+    return burnRevenueAvailable && FORECAST_MONTHS.includes(m.key) ? totalForecastRevenue(m.key) : null;
+  };
+  const chartLinesBurn = [];
+  // This page's own revenue: solid green with hollow dots.
+  chartLinesBurn.push({
+    name: "Revenue", color: "var(--success)", dash: "", hollow: true,
+    values: chartMonthList.map(m => revenueForMonth(p, null, m)),
+  });
+  // Each ticked scenario: its total expenses (filled dots), then its revenue (hollow dots), same colour and dash.
+  burnScenarioManager.chartedLines().forEach(l => {
+    chartLinesBurn.push({
+      name: `${l.name} — expenses`, color: l.color, dash: l.dash,
+      // A month the scenario has no expenses for (or with nothing entered) has no point.
+      values: chartMonthList.map(m => {
+        const col = shownColumnFor(l.data.expenses, m.label);
+        if (col === -1) return null;
+        const total = burnGrandTotal(l.data.expenses, col);
+        return total ? Math.round(total * 100) / 100 : null;
+      }),
+    });
+    chartLinesBurn.push({
+      name: `${l.name} — revenue`, color: l.color, dash: l.dash, hollow: true,
+      values: chartMonthList.map(m => (shownColumnFor(l.data.expenses, m.label) === -1 ? null : revenueForMonth(l.data.expenses, l.data.income, m))),
+    });
+  });
   const burnChart = buildStackedChart({
     availableWidth: document.getElementById("burnChartHolder").clientWidth,
     cardEl: document.getElementById("burnChartCard"),
@@ -5881,7 +5906,7 @@ function renderBurnForecastContent(){
     months: chartMonthList.map(m => m.key),
     series: chartSeries.filter(s => chartMonthList.some(m => categoryValue(s, m.key))),
     seriesValue: categoryValue,
-    scenarioLines: scenarioLinesBurn,
+    scenarioLines: chartLinesBurn,
     emptyMessage: "No expenses in the months shown — pick other months above the table.",
   });
   document.getElementById("burnChartHolder").appendChild(burnChart.el);
@@ -5926,7 +5951,7 @@ const SCENARIO_LINE_STYLES = [
   { color: "var(--danger)", dash: "7 4" },
   { color: "var(--accent)", dash: "2 4" },
   { color: "var(--warning)", dash: "10 3 2 3" },
-  { color: "var(--success)", dash: "5 3" },
+  { color: "var(--chart-other)", dash: "5 3" },   // (green is kept for EBITDA Forecasting's own revenue line)
 ];
 function createScenarioManager(cfg){
   // chartData[id]: what the chart needs from a ticked scenario (its cfg.chartColumn, run through
@@ -5947,10 +5972,9 @@ function createScenarioManager(cfg){
   async function ensureChartData(){
     const missing = [...state.charted].filter(id => !(id in state.chartData) && state.list.some(s => s.id === id));
     if (!missing.length) return;
-    const column = cfg.chartColumn || "income";
-    const { data, error } = await supabaseClient.from(cfg.table).select("id, " + column).in("id", missing);
+    const { data, error } = await supabaseClient.from(cfg.table).select("id, " + (cfg.chartColumns || "income")).in("id", missing);
     if (error){ state.message = { text: "Couldn't load a scenario for the chart: " + error.message, isError: true }; return; }
-    (data || []).forEach(r => { state.chartData[r.id] = r[column] ? (cfg.chartPrepare ? cfg.chartPrepare(r[column]) : r[column]) : null; });
+    (data || []).forEach(r => { state.chartData[r.id] = (cfg.chartPrepare ? cfg.chartPrepare(r) : r.income) || null; });
   }
   // Line style for a scenario: fixed by its place in the oldest-first list, so ticking others never recolours it.
   function lineStyle(id){
@@ -6228,11 +6252,12 @@ const burnScenarioManager = createScenarioManager({
   saveRpc: "save_burn_scenario",
   reinstateRpc: "reinstate_burn_scenario",
   sqlFile: "supabase-burn-scenarios.sql",
-  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its total expenses as a line on the chart at the top.",
+  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its total expenses and its revenue as lines on the chart at the top.",
   chartToggle: true,
-  chartColumn: "expenses",
+  chartColumns: "expenses, income",
   chartWhat: "expenses",
-  chartPrepare: (expenses) => normalizeBurnPayload(JSON.parse(JSON.stringify(expenses))),
+  // A scenario saved without expenses has nothing to draw (null).
+  chartPrepare: (row) => (row.expenses ? { expenses: normalizeBurnPayload(JSON.parse(JSON.stringify(row.expenses))), income: row.income } : null),
   reinstateWarning: "This replaces the expenses on this page AND every line and figure on the Revenue Forecasting page, for everyone.",
   rerender: () => renderBurnForecastContent(),
   afterReinstate: () => renderBurnForecast(),
