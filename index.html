@@ -3954,46 +3954,52 @@ function projectForecastRevenue(projectId, month){
 const FORECAST_CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
 // scenarioLines: saved scenarios ticked on the Scenarios list, drawn over the
 // bars as lines — [{ name, color, dash, values }] with one total-revenue value
-// per FORECAST_MONTHS entry.
-function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = []){
-  // Rank projects by total forecasted revenue over the window; past the
-  // 6th, fold into "Other" rather than generating more categorical hues.
+// per entry of `months`. months: the months to draw — the range picked above
+// the table (default: all).
+function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [], months = FORECAST_MONTHS){
+  // Rank projects by total forecasted revenue over the whole window (not just
+  // the months shown, so a project keeps its colour as the range changes);
+  // past the 6th, fold into "Other" rather than generating more categorical hues.
   const totals = PROJECTS.map(p => ({
     id: p.id, name: p.name,
     total: FORECAST_MONTHS.reduce((sum, m) => sum + projectForecastRevenue(p.id, m), 0),
   })).filter(t => t.total > 0).sort((a, b) => b.total - a.total);
   const topProjects = totals.slice(0, FORECAST_CHART_COLORS.length);
   const otherProjects = totals.slice(FORECAST_CHART_COLORS.length);
-  const series = topProjects.map((p, i) => ({ id: p.id, name: p.name, color: FORECAST_CHART_COLORS[i] }));
-  if (otherProjects.length) series.push({ id: "__other__", name: "Other projects", color: "var(--chart-other)" });
+  const allSeries = topProjects.map((p, i) => ({ id: p.id, name: p.name, color: FORECAST_CHART_COLORS[i] }));
+  if (otherProjects.length) allSeries.push({ id: "__other__", name: "Other projects", color: "var(--chart-other)" });
+  const seriesValue = (s, month) => s.id === "__other__"
+    ? otherProjects.reduce((sum, p) => sum + projectForecastRevenue(p.id, month), 0)
+    : projectForecastRevenue(s.id, month);
+  // Only projects with revenue in the months shown get a legend entry.
+  const series = allSeries.filter(s => months.some(m => seriesValue(s, m) > 0));
 
-  const monthData = FORECAST_MONTHS.map((month, mi) => {
-    const segments = series.map(s => ({
-      ...s,
-      value: s.id === "__other__"
-        ? otherProjects.reduce((sum, p) => sum + projectForecastRevenue(p.id, month), 0)
-        : projectForecastRevenue(s.id, month),
-    })).filter(s => s.value > 0);
+  const monthData = months.map((month, mi) => {
+    const segments = series.map(s => ({ ...s, value: seriesValue(s, month) })).filter(s => s.value > 0);
     const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] }));
     return { month, segments, scenarios, total: segments.reduce((sum, s) => sum + s.value, 0) };
   });
   const maxTotal = Math.max(1, ...monthData.map(m => m.total), ...scenarioLines.flatMap(l => l.values));
 
-  if (!totals.length && !scenarioLines.length){
+  if (!series.length && !scenarioLines.length){
     const p = document.createElement("p");
     p.className = "summary-facts";
-    p.textContent = "No forecasted revenue yet — add locations and a price per month below.";
+    p.textContent = totals.length
+      ? "No forecasted revenue in the months shown — pick other months above the table."
+      : "No forecasted revenue yet — add locations and a price per month below.";
     return { el: p, legendHtml: "" };
   }
 
   const chartH = 200;
   const leftGutter = 64;
   // Fit all months into the visible width instead of scrolling — bars get
-  // narrower on a smaller window rather than overflowing.
-  const chartW = Math.max(availableWidth - leftGutter, FORECAST_MONTHS.length * 8);
-  const perMonth = chartW / FORECAST_MONTHS.length;
+  // narrower on a smaller window rather than overflowing (and stop getting
+  // wider past a point when only a few months are shown).
+  const chartW = Math.max(availableWidth - leftGutter, months.length * 8);
+  const perMonth = chartW / months.length;
   const gap = Math.min(perMonth * 0.35, 18);
-  const barW = Math.max(perMonth - gap, 6);
+  const barW = Math.min(Math.max(perMonth - gap, 6), 64);
+  const barInset = (perMonth - barW) / 2;
   const radius = 4;
 
   // "Nice" axis ceiling and 4 gridline steps.
@@ -4011,7 +4017,7 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
 
   let bars = "";
   monthData.forEach((m, i) => {
-    const x = i * perMonth + gap / 2;
+    const x = i * perMonth + barInset;
     let yCursor = chartH;
     m.segments.forEach((seg, si) => {
       const segH = Math.max((seg.value / axisMax) * chartH - 2, 1); // 2px surface gap between segments
@@ -4472,15 +4478,17 @@ function renderForecastingContent(){
 
   // The chart fits itself to the visible width (no horizontal scroll); only
   // the table scrolls, via a scrollbar placed above it instead of below.
+  // Chart and table show the same months: the range picked above the table.
+  const shownMonths = FORECAST_MONTHS.slice(range.from, range.to + 1);
   const scenarioLines = revenueScenarioManager.chartedLines().map(l => ({
     name: l.name, color: l.color, dash: l.dash,
-    values: FORECAST_MONTHS.map(m => incomeRevenue(l.income, m)),
+    values: shownMonths.map(m => incomeRevenue(l.income, m)),
   }));
-  const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl, scenarioLines);
+  const { el: chartEl, legendHtml } = buildForecastChart(chartHolder.clientWidth, cardEl, tooltipEl, scenarioLines, shownMonths);
   chartHolder.appendChild(chartEl);
   legendEl.innerHTML = legendHtml;
 
-  const tableEl = buildForecastTable(FORECAST_MONTHS.slice(range.from, range.to + 1));
+  const tableEl = buildForecastTable(shownMonths);
   tableScroll.appendChild(tableEl);
   pinForecastTableTop(tableEl);
 
