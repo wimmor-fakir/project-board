@@ -5846,16 +5846,13 @@ function renderBurnForecastContent(){
     }
     return `<td class="burn-${kindClass(c)}${dividerClass(i)}${partialClass(c)}"${title ? ` title="${escapeHtmlText(title)}"` : ""}>${revenue === null ? "—" : formatZar(revenue)}</td>`;
   }).join("") + displayTotals(revenueFor);
-  let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn<span class="burn-section-detail">revenue − total expenses</span></td>${burnCells}</tr>`;
-  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="A (Actual) columns: that month's Sales in Xero (accrual basis). B and F columns: the Revenue Forecasting page's total for the month (locations × price), excluding lines unticked for its chart${burnRevenueAvailable ? "" : " — couldn't load that page's data"}">Monthly revenue<span class="burn-section-detail">A: actual from Xero · B / F: Revenue Forecasting</span></td>${revenueCells}</tr>`;
+  let body = `<tr class="burn-net-row"><td class="forecast-project-cell burn-account-cell" title="Monthly revenue minus TOTAL EXPENSES — negative (in brackets) means that month burns cash">Burn</td>${burnCells}</tr>`;
+  body += `<tr class="burn-revenue-row"><td class="forecast-project-cell burn-account-cell" title="A (Actual) columns: that month's Sales in Xero (accrual basis). B and F columns: the Revenue Forecasting page's total for the month (locations × price), excluding lines unticked for its chart${burnRevenueAvailable ? "" : " — couldn't load that page's data"}">Monthly revenue</td>${revenueCells}</tr>`;
   body += `<tr class="burn-grand-row"><td class="forecast-project-cell burn-account-cell">${escapeHtmlText(p.grandTotalLabel || "Total expenses")}</td>${numCells(i => sumOrNull(grandAccounts, i))}</tr>`;
   p.sections.forEach((s, si) => {
     const collapsed = burnCollapsedSections.has(si);
-    // A trailing "(…)" in the sheet's heading is an explanatory aside — shown small, under the name.
-    const titleParts = String(s.title).match(/^(.*?)\s*\((.*)\)$/);
-    const titleHtml = titleParts
-      ? `${escapeHtmlText(titleParts[1])}<span class="burn-section-detail">${escapeHtmlText(titleParts[2])}</span>`
-      : escapeHtmlText(s.title);
+    // A trailing "(…)" in the sheet's heading is an explanatory aside — left off the row.
+    const titleHtml = escapeHtmlText(String(s.title).replace(/\s*\(.*\)\s*$/, ""));
     body += `<tr class="burn-section-row"><td class="forecast-project-cell burn-account-cell"><button type="button" class="burn-section-toggle" data-burn-toggle-section="${si}" aria-expanded="${!collapsed}"><span aria-hidden="true">${collapsed ? "▸" : "▾"}</span><span>${titleHtml}</span></button></td>${numCells(i => sectionSum(s, i))}</tr>`;
     if (!collapsed){
       s.accounts.forEach((a, ai) => {
@@ -5871,11 +5868,9 @@ function renderBurnForecastContent(){
   const prevScrollLeft = prevScroll ? prevScroll.scrollLeft : 0;
   const prevScrollTop = prevScroll ? prevScroll.scrollTop : 0;
   burnForecastPanel.innerHTML = `
-    <div class="summary-intro">
-      <p>${escapeHtmlText(p.title || "EBITDA Forecasting")}</p>
+    <div class="summary-intro summary-intro-end">
       <button type="button" class="btn btn-new" id="refreshBurnBtn">↻ Refresh</button>
     </div>
-    ${p.subtitle ? `<p class="burn-subtitle">${escapeHtmlText(p.subtitle)}</p>` : ""}
     <div class="forecast-card" id="burnChartCard">
       <div id="burnChartHolder"></div>
       <div class="forecast-legend" id="burnChartLegend"></div>
@@ -5894,9 +5889,7 @@ function renderBurnForecastContent(){
         </table>
       </div>
       ${burnForecastSaveError ? `<p class="modal-error">${escapeHtmlText(burnForecastSaveError)}</p>` : ""}
-      <p class="burn-status">All figures in ZAR. Each month shows B = Budget next to A = Actual or F = Forecast — switch with the A | F toggle at the top of the column. An Actual or Forecast expense is red when it's over that month's Budget and green when it's on or under. Total, on the right, adds up the months picked above. A Forecast figure is the same as Budget (shown faded) until you type a forecast of your own; clear it to go back to Budget. Click any account cell to edit it — heading and total rows recalculate automatically. While editing a Budget or Forecast cell, → (or Shift+Enter) copies the value into that row for every later month. ${xeroActualError
-        ? `Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})`
-        : `Revenue in A columns is actual Sales from Xero (accrual basis)${xeroActualRefreshedAt ? `, last refreshed ${escapeHtmlText(formatChangeTimestamp(xeroActualRefreshedAt))}` : " — none loaded yet"}; a dashed underline marks a month that's still in progress (month to date).`}${burnForecastMeta && burnForecastMeta.updated_at ? ` Last saved ${escapeHtmlText(formatChangeTimestamp(burnForecastMeta.updated_at))}${burnForecastMeta.updated_by ? ` by ${escapeHtmlText(burnForecastMeta.updated_by)}` : ""}.` : ""}</p>
+      ${xeroActualError ? `<p class="burn-status">Couldn't load actual revenue from Xero — has supabase-xero-actual-revenue.sql been run yet? (${escapeHtmlText(xeroActualError)})</p>` : ""}
     </div>
     <div class="burn-scenarios-bottom">${burnScenarioManager.html()}</div>
   `;
