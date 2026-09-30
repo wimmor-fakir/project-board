@@ -3994,7 +3994,8 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
 // down from it (positiveOnly leaves negatives out of the drawing — they are still listed
 // in the tooltip). scenarioLines: [{ name, color, dash, marker, slot, values }] with one
 // number (or null for no figure) per month; slot is the bar of the month the line's
-// points sit over (default the first); marker is "dot" (default), "hollow" or "square".
+// points sit over (default the first; "center" puts them in the middle of the month's
+// bars); marker is "dot" (default), "hollow" or "square".
 function scenarioMarkerSvg(l, cx, cy, r){
   const fill = l.marker === "hollow" ? "var(--surface)" : l.color;
   const stroke = l.marker === "hollow" ? l.color : "var(--surface)";
@@ -4129,7 +4130,8 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   const lineY = (v) => zeroY - v * pxPerUnit;
   const scenarioSvg = scenarioLines.map(l => {
     // A month the scenario has no figure for is skipped (the line joins its neighbours).
-    const points = l.values.map((v, i) => ({ v, x: slotX(i, l.slot || 0) + barW / 2 })).filter(p => p.v !== null && p.v !== undefined && !Number.isNaN(p.v));
+    const lineX = (i) => (l.slot === "center" ? i * perMonth + perMonth / 2 : slotX(i, l.slot || 0) + barW / 2);
+    const points = l.values.map((v, i) => ({ v, x: lineX(i) })).filter(p => p.v !== null && p.v !== undefined && !Number.isNaN(p.v));
     const pts = points.map(({ v, x }) => `${x.toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
     const dots = points.map(({ v, x }) => scenarioMarkerSvg(l, x, lineY(v), 3.2)).join("");
     return `<g class="forecast-scenario-line" pointer-events="none">
@@ -5902,11 +5904,11 @@ function renderBurnForecastContent(){
   burnScenarioManager.wire();
   wireMonthRange("burnMonthRange", rangeMonths, BURN_RANGE_KEY, renderBurnForecastContent);
 
-  // Chart above the table, for the same months as the table: three bars per month —
+  // Chart above the table, for the same months as the table: two bars per month —
   // Expenses (stacked by category, using whichever of Actual / Forecast that month is
-  // showing), Income, and Burn (income minus expenses; below zero when it burns cash) —
-  // and, for each ticked scenario, lines for its expenses, income and burn over the
-  // matching bars.
+  // showing) and Income — with Burn (income minus expenses; below zero when it burns
+  // cash) as a line through the middle of each month. Each ticked scenario adds only its
+  // own burn, as a dashed line.
   const chartMonthList = rangeMonths.slice(range.from, range.to + 1);
   const labelOfKey = {};
   chartMonthList.forEach(m => { labelOfKey[m.key] = m.label; });
@@ -5944,35 +5946,29 @@ function renderBurnForecastContent(){
     color: i < FORECAST_CHART_COLORS.length ? FORECAST_CHART_COLORS[i] : "var(--chart-other)",
   }));
   const incomeSeries = [{ id: "__income", name: "Income", color: "var(--success)" }];
-  const burnSeries = [
-    { id: "__burn_loss", name: "Burn (cash out)", color: "var(--danger)" },
-    { id: "__burn_gain", name: "Burn (cash in)", color: "var(--accent)" },
-  ];
+
   const categoryValue = (series, monthKey) => {
     const col = shownColumnFor(p, labelOfKey[monthKey]);
     const section = p.sections[series.id];
     return col === -1 ? 0 : round2(burnSectionSum(p, section, col, section.inOpex));
   };
   const incomeValue = (series, monthKey) => revenueForMonth(p, null, monthOfKey(monthKey)) || 0;
-  const burnValue = (series, monthKey) => {
-    const burn = burnForMonth(p, null, monthOfKey(monthKey));
-    if (burn === null) return 0;
-    return series.id === "__burn_loss" ? (burn < 0 ? burn : 0) : (burn > 0 ? burn : 0);
-  };
   const anyValue = (series, valueOf) => series.filter(s => chartMonthList.some(m => valueOf(s, m.key)));
 
-  // Each ticked scenario: expenses (filled dots), income (hollow dots) and burn (squares), same
-  // colour and dash, each with its points over the bar it matches. A month the scenario has no
-  // expenses for (or with nothing entered) has no point.
-  const chartLinesBurn = [];
+  // This page's burn: a solid line through the middle of each month's bars. A month with no
+  // income figure (nothing from Xero, no forecast) has no point.
+  const chartLinesBurn = [{
+    name: "Burn", color: "var(--ink)", dash: "", slot: "center", marker: "square",
+    values: chartMonthList.map(m => burnForMonth(p, null, m)),
+  }];
+  // Each ticked scenario adds only its burn, dashed, in the scenario's colour. A month the
+  // scenario has no expenses for (or with nothing entered) has no point.
   burnScenarioManager.chartedLines().forEach(l => {
     const exp = l.data.expenses, inc = l.data.income;
-    const scenarioExpenses = (m) => { const v = expensesForMonth(exp, m); return v ? v : null; };
-    const scenarioIncome = (m) => (expensesForMonth(exp, m) === null ? null : revenueForMonth(exp, inc, m));
-    const scenarioBurn = (m) => (scenarioExpenses(m) === null ? null : burnForMonth(exp, inc, m));
-    chartLinesBurn.push({ name: `${l.name} — expenses`, color: l.color, dash: l.dash, slot: 0, marker: "dot", values: chartMonthList.map(scenarioExpenses) });
-    chartLinesBurn.push({ name: `${l.name} — income`, color: l.color, dash: l.dash, slot: 1, marker: "hollow", values: chartMonthList.map(scenarioIncome) });
-    chartLinesBurn.push({ name: `${l.name} — burn`, color: l.color, dash: l.dash, slot: 2, marker: "square", values: chartMonthList.map(scenarioBurn) });
+    chartLinesBurn.push({
+      name: `${l.name} — burn`, color: l.color, dash: l.dash || "7 4", slot: "center", marker: "square",
+      values: chartMonthList.map(m => (expensesForMonth(exp, m) ? burnForMonth(exp, inc, m) : null)),
+    });
   });
   const burnChart = buildStackedChart({
     availableWidth: document.getElementById("burnChartHolder").clientWidth,
@@ -5982,7 +5978,6 @@ function renderBurnForecastContent(){
     bars: [
       { name: "Expenses", series: anyValue(expenseSeries, categoryValue), seriesValue: categoryValue, positiveOnly: true },
       { name: "Income", series: anyValue(incomeSeries, incomeValue), seriesValue: incomeValue },
-      { name: "Burn", series: anyValue(burnSeries, burnValue), seriesValue: burnValue },
     ],
     scenarioLines: chartLinesBurn,
     emptyMessage: "No expenses or income in the months shown — pick other months above the table.",
@@ -6057,7 +6052,8 @@ function createScenarioManager(cfg){
   // Line style for a scenario: fixed by its place in the oldest-first list, so ticking others never recolours it.
   function lineStyle(id){
     const i = state.list.slice().reverse().findIndex(s => s.id === id);
-    return SCENARIO_LINE_STYLES[Math.max(i, 0) % SCENARIO_LINE_STYLES.length];
+    const styles = cfg.lineStyles || SCENARIO_LINE_STYLES;
+    return styles[Math.max(i, 0) % styles.length];
   }
   // The ticked scenarios ready to draw: [{ id, name, data, color, dash }], newest first as listed.
   function chartedLines(){
@@ -6330,8 +6326,16 @@ const burnScenarioManager = createScenarioManager({
   saveRpc: "save_burn_scenario",
   reinstateRpc: "reinstate_burn_scenario",
   sqlFile: "supabase-burn-scenarios.sql",
-  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its expenses, income and burn as lines on the chart at the top.",
+  hint: "Saves this page's expenses together with the income on the Revenue Forecasting page, date-stamped. Tick a scenario to draw its burn as a dashed line on the chart at the top.",
   chartToggle: true,
+  // Dashed lines only, in colours apart from this page's own solid black Burn line.
+  lineStyles: [
+    { color: "var(--danger)", dash: "7 4" },
+    { color: "var(--accent)", dash: "7 4" },
+    { color: "var(--warning)", dash: "7 4" },
+    { color: "var(--chart-other)", dash: "7 4" },
+    { color: "var(--success)", dash: "7 4" },
+  ],
   chartColumns: "expenses, income",
   chartWhat: "expenses",
   // A scenario saved without expenses has nothing to draw (null).
