@@ -3987,15 +3987,27 @@ function buildForecastChart(availableWidth, cardEl, tooltipEl, scenarioLines = [
 // color }] already limited to those worth a legend entry; seriesValue(series, month)
 // gives a segment's value; scenarioLines[].values holds one number (or null for no
 // figure) per month. Only positive segments are stacked; every non-zero segment
-// is listed in the tooltip.
+// is listed in the tooltip. A series (or line) flagged `below` holds a positive
+// amount that is drawn downward from the zero line, i.e. as a negative — EBITDA
+// Forecasting shows revenue that way, against expenses going up.
 function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, seriesValue, scenarioLines = [], emptyMessage }){
   const monthData = months.map((month, mi) => {
     const listed = series.map(s => ({ ...s, value: seriesValue(s, month) })).filter(s => s.value);
-    const segments = listed.filter(s => s.value > 0);
+    const segments = listed.filter(s => s.value > 0 && !s.below);
+    const belowSegments = listed.filter(s => s.value > 0 && s.below);
     const scenarios = scenarioLines.map(l => ({ name: l.name, color: l.color, value: l.values[mi] })).filter(s => s.value !== null && s.value !== undefined);
-    return { month, label: /^\d{4}-\d\d-\d\d$/.test(month) ? forecastMonthLabel(month, true) : month, listed, segments, scenarios, total: listed.reduce((sum, s) => sum + s.value, 0), stacked: segments.reduce((sum, s) => sum + s.value, 0) };
+    return {
+      month, label: /^\d{4}-\d\d-\d\d$/.test(month) ? forecastMonthLabel(month, true) : month,
+      listed, segments, belowSegments, scenarios,
+      total: listed.filter(s => !s.below).reduce((sum, s) => sum + s.value, 0),   // the tooltip's heading: everything going up
+      stacked: segments.reduce((sum, s) => sum + s.value, 0),
+      belowStacked: belowSegments.reduce((sum, s) => sum + s.value, 0),
+    };
   });
-  const maxTotal = Math.max(1, ...monthData.map(m => m.stacked), ...scenarioLines.flatMap(l => l.values.filter(v => v !== null && v !== undefined)));
+  const lineValues = (below) => scenarioLines.filter(l => !!l.below === below).flatMap(l => l.values.filter(v => v !== null && v !== undefined));
+  const maxUp = Math.max(1, ...monthData.map(m => m.stacked), ...lineValues(false));
+  const maxDown = Math.max(0, ...monthData.map(m => m.belowStacked), ...lineValues(true));
+  const hasBelow = maxDown > 0;
 
   if (!series.length && !scenarioLines.length){
     const p = document.createElement("p");
@@ -4004,8 +4016,8 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
     return { el: p, legendHtml: "" };
   }
 
-  const chartH = 200;
-  const leftGutter = 64;
+  const chartH = hasBelow ? 280 : 200;
+  const leftGutter = hasBelow ? 84 : 64;
   // Fit all months into the visible width instead of scrolling — bars get
   // narrower on a smaller window rather than overflowing (and stop getting
   // wider past a point when only a few months are shown).
@@ -4016,25 +4028,41 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   const barInset = (perMonth - barW) / 2;
   const radius = 4;
 
-  // "Nice" axis ceiling and 4 gridline steps.
-  const rawStep = maxTotal / 4;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
-  const niceStep = Math.ceil(rawStep / magnitude) * magnitude;
-  const axisMax = niceStep * 4;
+  // "Nice" axis: with nothing below zero, a ceiling and 4 gridline steps; with a
+  // below-zero side, 1-2-5 steps reaching a little past the largest value each way.
+  let niceStep, axisTop, axisBottom;
+  if (!hasBelow){
+    const rawStep = maxUp / 4;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    niceStep = Math.ceil(rawStep / magnitude) * magnitude;
+    axisTop = niceStep * 4;
+    axisBottom = 0;
+  } else {
+    const rawStep = (maxUp + maxDown) / 6;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    const norm = rawStep / magnitude;
+    niceStep = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * magnitude;
+    axisTop = Math.max(1, Math.ceil(maxUp / niceStep)) * niceStep;
+    axisBottom = Math.ceil(maxDown / niceStep) * niceStep;
+  }
+  const pxPerUnit = chartH / (axisTop + axisBottom);
+  const zeroY = axisTop * pxPerUnit;
+  const axisLabel = (v) => (v < 0 ? "−" + formatCurrency(-v) : formatCurrency(v));
 
   let gridlines = "";
-  for (let i = 0; i <= 4; i++){
-    const y = chartH - (i * niceStep / axisMax) * chartH;
-    gridlines += `<line x1="0" y1="${y}" x2="${chartW}" y2="${y}" stroke="var(--chart-grid)" stroke-width="1"/>`;
-    gridlines += `<text x="-8" y="${y}" text-anchor="end" dominant-baseline="middle" class="forecast-axis-label">${formatCurrency(i * niceStep)}</text>`;
+  for (let k = -Math.round(axisBottom / niceStep); k <= Math.round(axisTop / niceStep); k++){
+    const y = zeroY - k * niceStep * pxPerUnit;
+    const isZero = hasBelow && k === 0;
+    gridlines += `<line x1="0" y1="${y}" x2="${chartW}" y2="${y}" stroke="${isZero ? "var(--ink-3)" : "var(--chart-grid)"}" stroke-width="${isZero ? 1.5 : 1}"/>`;
+    gridlines += `<text x="-8" y="${y}" text-anchor="end" dominant-baseline="middle" class="forecast-axis-label">${axisLabel(k * niceStep)}</text>`;
   }
 
   let bars = "";
   monthData.forEach((m, i) => {
     const x = i * perMonth + barInset;
-    let yCursor = chartH;
+    let yCursor = zeroY;
     m.segments.forEach((seg, si) => {
-      const segH = Math.max((seg.value / axisMax) * chartH - 2, 1); // 2px surface gap between segments
+      const segH = Math.max(seg.value * pxPerUnit - 2, 1); // 2px surface gap between segments
       const y = yCursor - segH;
       const isTop = si === m.segments.length - 1;
       if (isTop){
@@ -4044,6 +4072,19 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
         bars += `<rect x="${x}" y="${y}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
       }
       yCursor = y - 2;
+    });
+    // Below-zero segments hang down from the zero line, the last one rounded at its bottom.
+    let yDown = zeroY;
+    m.belowSegments.forEach((seg, si) => {
+      const segH = Math.max(seg.value * pxPerUnit - 2, 1);
+      const isEnd = si === m.belowSegments.length - 1;
+      if (isEnd){
+        bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" rx="${radius}" fill="${seg.color}"/>`;
+        if (segH > radius) bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${radius}" fill="${seg.color}"/>`;
+      } else {
+        bars += `<rect x="${x}" y="${yDown}" width="${barW}" height="${segH}" fill="${seg.color}"/>`;
+      }
+      yDown += segH + 2;
     });
     bars += `<rect class="forecast-bar-hit" data-forecast-bar="${i}" x="${i * perMonth}" y="0" width="${perMonth}" height="${chartH}" fill="transparent"/>`;
   });
@@ -4061,10 +4102,11 @@ function buildStackedChart({ availableWidth, cardEl, tooltipEl, months, series, 
   // One line per ticked scenario, on top of the bars. A surface-coloured
   // outline under each keeps it readable where it crosses a bar; pointer-events
   // are off so the month hover targets underneath still work.
-  const lineY = (v) => chartH - (v / axisMax) * chartH;
+  const lineY = (v) => zeroY - v * pxPerUnit;
   const scenarioSvg = scenarioLines.map(l => {
     // A month the scenario has no figure for is skipped (the line joins its neighbours).
-    const points = l.values.map((v, i) => ({ v, i })).filter(p => p.v !== null && p.v !== undefined);
+    // A `below` line is plotted as a negative.
+    const points = l.values.map((v, i) => ({ v: l.below ? -v : v, i })).filter(p => p.v !== null && p.v !== undefined && !Number.isNaN(p.v));
     const pts = points.map(({ v, i }) => `${(i * perMonth + perMonth / 2).toFixed(1)},${lineY(v).toFixed(1)}`).join(" ");
     // Hollow dots mark a revenue line (solid ones are expenses), so the two stay apart even in the same colour.
     const dots = points.map(({ v, i }) => `<circle cx="${(i * perMonth + perMonth / 2).toFixed(1)}" cy="${lineY(v).toFixed(1)}" r="3.2" fill="${l.hollow ? "var(--surface)" : l.color}" stroke="${l.hollow ? l.color : "var(--surface)"}" stroke-width="${l.hollow ? 2 : 1.5}"/>`).join("");
@@ -5847,7 +5889,8 @@ function renderBurnForecastContent(){
 
   // Chart above the table, for the same months as the table: one stacked bar per
   // month (total expenses split by category, using whichever of Actual / Forecast
-  // that month is showing), a Revenue line, and expenses + revenue lines for each ticked scenario.
+  // that month is showing) with Revenue hanging below zero as a negative bar, and
+  // expenses + revenue lines (revenue below zero too) for each ticked scenario.
   const chartMonthList = rangeMonths.slice(range.from, range.to + 1);
   const labelOfKey = {};
   chartMonthList.forEach(m => { labelOfKey[m.key] = m.label; });
@@ -5861,6 +5904,7 @@ function renderBurnForecastContent(){
     color: i < FORECAST_CHART_COLORS.length ? FORECAST_CHART_COLORS[i] : "var(--chart-other)",
   }));
   const categoryValue = (series, monthKey) => {
+    if (series.id === "__revenue") return revenueForMonth(p, null, { key: monthKey, label: labelOfKey[monthKey] }) || 0;
     const col = shownColumnFor(p, labelOfKey[monthKey]);
     const section = p.sections[series.id];
     return col === -1 ? 0 : Math.round(burnSectionSum(p, section, col, section.inOpex) * 100) / 100;
@@ -5877,12 +5921,10 @@ function renderBurnForecastContent(){
     return burnRevenueAvailable && FORECAST_MONTHS.includes(m.key) ? totalForecastRevenue(m.key) : null;
   };
   const chartLinesBurn = [];
-  // This page's own revenue: solid green with hollow dots.
-  chartLinesBurn.push({
-    name: "Revenue", color: "var(--success)", dash: "", hollow: true,
-    values: chartMonthList.map(m => revenueForMonth(p, null, m)),
-  });
-  // Each ticked scenario: its total expenses (filled dots), then its revenue (hollow dots), same colour and dash.
+  // This page's own revenue is a green bar hanging below the zero line (a negative, against expenses going up).
+  chartSeries.push({ id: "__revenue", name: "Revenue", color: "var(--success)", below: true });
+  // Each ticked scenario: its total expenses (filled dots), then its revenue (hollow dots, plotted below zero
+  // like the Revenue bars), same colour and dash.
   burnScenarioManager.chartedLines().forEach(l => {
     chartLinesBurn.push({
       name: `${l.name} — expenses`, color: l.color, dash: l.dash,
@@ -5895,7 +5937,7 @@ function renderBurnForecastContent(){
       }),
     });
     chartLinesBurn.push({
-      name: `${l.name} — revenue`, color: l.color, dash: l.dash, hollow: true,
+      name: `${l.name} — revenue`, color: l.color, dash: l.dash, hollow: true, below: true,
       values: chartMonthList.map(m => (shownColumnFor(l.data.expenses, m.label) === -1 ? null : revenueForMonth(l.data.expenses, l.data.income, m))),
     });
   });
