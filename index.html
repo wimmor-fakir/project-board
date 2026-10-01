@@ -4906,6 +4906,50 @@ function leaveEopFor(name){
   if (!psData) return null;
   return leaveBop(name) + leavePayspaceEntitlement(name) - psData.applications;
 }
+// The "to 30 September" columns: the 2026/27 cycle starts 1 May 2026, and
+// 1 May – 30 Sep is 5 of its 12 months.
+const LEAVE_CYCLE_START = "2026-05-01";
+const LEAVE_TO_DATE = "2026-09-30";
+const LEAVE_MONTHS_TO_DATE = 5;
+function weekdaysBetween(startStr, endStr){
+  let count = 0;
+  for (let cur = startStr; cur <= endStr; cur = addDaysToDateStr(cur, 1)){
+    const dow = new Date(cur + "T00:00:00Z").getUTCDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+// Days of the person's approved PaySpace applications that fall between
+// 1 May 2026 and 30 Sep 2026. An application wholly inside counts in full,
+// one wholly outside not at all; one straddling a boundary counts the share
+// of its days (by weekday) that falls inside. null when PaySpace data isn't
+// available yet (no PaySpace #, or no sync).
+function leaveApplicationsToDate(name){
+  const psData = payspaceDataFor(name);
+  if (!psData) return null;
+  if (!Array.isArray(psData.application_details)){
+    return psData.applications ? null : 0;   // an older cached sync without the dates: can't split it
+  }
+  return psData.application_details.reduce((sum, d) => {
+    const from = d.start > LEAVE_CYCLE_START ? d.start : LEAVE_CYCLE_START;
+    const to = d.end < LEAVE_TO_DATE ? d.end : LEAVE_TO_DATE;
+    if (from > to) return sum;
+    if (from === d.start && to === d.end) return sum + d.days;
+    const total = weekdaysBetween(d.start, d.end);
+    return total ? sum + d.days * weekdaysBetween(from, to) / total : sum;
+  }, 0);
+}
+// The entitlement accrued over the first 5 months of the cycle, 5/12 of the
+// year's — 10.41 on the standard 25 days (10.4166…, cut — not rounded — to
+// two decimals).
+function leaveEntitlementToDate(name){
+  return Math.floor(leavePayspaceEntitlement(name) * LEAVE_MONTHS_TO_DATE / 12 * 100 + 1e-9) / 100;
+}
+// Balance at 30 Sep = BOP - applications since 1 May + entitlement accrued to date.
+function leaveBalanceToDateFor(name){
+  const applied = leaveApplicationsToDate(name);
+  return applied === null ? null : leaveBop(name) - applied + leaveEntitlementToDate(name);
+}
 function formatLeaveDays(n){
   return (n > 0 ? "+" : "") + n.toFixed(2);
 }
@@ -5000,6 +5044,9 @@ function buildLeaveTable(){
     const psNumber = leavePayspaceNumber(name);
     const psData = payspaceDataFor(name);
     const eop = leaveEopFor(name);
+    const appliedToDate = leaveApplicationsToDate(name);
+    const balanceToDate = leaveBalanceToDateFor(name);
+    const toDateTitle = psData ? "" : "Sync from PaySpace to compute — needs this person's PaySpace Applications";
     return `
       <tr>
         <td class="leave-person-cell">${avatarHtml(name)}<span>${name}</span></td>
@@ -5008,6 +5055,8 @@ function buildLeaveTable(){
         <td><span class="leave-cell-editable" data-edit-leave-payspace-entitlement="${name}" data-value="${leavePayspaceEntitlement(name)}" title="Click to edit this person's entitlement for the current cycle">${formatPayspaceDays(leavePayspaceEntitlement(name))}</span></td>
         <td class="leave-payspace-cell leave-payspace-applications-cell">${buildApplicationDetailsHtml(psData)}</td>
         <td class="mono leave-balance-cell" title="${psData ? "" : "Sync from PaySpace to compute — needs the PaySpace Applications total for this person"}">${eop === null ? "—" : formatLeaveDays(eop)}</td>
+        <td class="mono leave-payspace-cell leave-payspace-applications-cell" title="${toDateTitle}">${appliedToDate === null ? "—" : formatPayspaceDays(appliedToDate)}</td>
+        <td class="mono leave-balance-cell" title="${balanceToDate === null ? toDateTitle : `BOP ${formatPayspaceDays(leaveBop(name))} − applications ${formatPayspaceDays(appliedToDate)} + entitlement to 30 Sept ${leaveEntitlementToDate(name).toFixed(2)}`}">${balanceToDate === null ? "—" : formatLeaveDays(balanceToDate)}</td>
       </tr>`;
   }).join("");
   const wrap = document.createElement("div");
@@ -5029,6 +5078,8 @@ function buildLeaveTable(){
           <th>PaySpace Entitlement</th>
           <th>PaySpace Applications (1 May '26 – 30 Apr '27)</th>
           <th>EOP</th>
+          <th>PaySpace Applications (1 May '26 – 30 Sept)</th>
+          <th title="BOP − PaySpace Applications (1 May '26 – 30 Sept) + the entitlement accrued to 30 Sept (5/12 of the year's, 10.41 on 25 days)">30 Sept balance</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
