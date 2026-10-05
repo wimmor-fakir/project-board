@@ -1125,10 +1125,13 @@
   .goals-date-editable:hover{ filter:brightness(0.97); }
   .goals-date-input{ font: inherit; font-size:13px; }
   /* Team update page: the goals of the signed-in person's projects. */
+  .tu-goals-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; margin-bottom:16px; }
+  @media (max-width: 900px){ .tu-goals-grid{ grid-template-columns:1fr; } }
   .tu-goals-card{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
-    box-shadow:var(--shadow); padding:14px 18px; margin-bottom:16px;
+    box-shadow:var(--shadow); padding:14px 18px;
   }
+  .tu-goals-project-cell{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
   .tu-goals-head{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
   .tu-goals-head .settings-section-title{ margin-bottom:0; }
   .tu-goals-date{ font-size:12px; color:var(--ink-3); }
@@ -3812,22 +3815,39 @@ async function postTeamUpdate(){
 // sign-in email).
 function buildTeamUpdateGoalsHtml(){
   const me = myTasksPersonName();
-  if (!me){
-    return `<div class="tu-goals-card"><div class="tu-goals-head"><span class="settings-section-title">Your project goals</span></div>
-      <p class="summary-facts">Couldn't tell which person you are — pick yourself on the My Tasks page and your projects' goals will show here.</p></div>`;
-  }
-  const mine = PROJECTS.filter(p => p.owner === me);
-  const date = goalsTargetDate ? ` <span class="tu-goals-date">for ${escapeHtmlText(formatDateWithYear(goalsTargetDate))}</span>` : "";
-  const rows = mine.map(p => {
+  const goalsHtml = (p) => {
     const goals = [1, 2, 3].map(slot => goalText(p.id, slot)).filter(Boolean);
-    const list = goals.length
+    return goals.length
       ? `<ol class="tu-goals-items">${goals.map(g => `<li>${escapeHtmlText(g)}</li>`).join("")}</ol>`
       : `<span class="tu-goals-none">No goals set yet</span>`;
-    return `<div class="tu-goals-row"><span class="project-link tu-goals-project" data-goto-project="${escapeHtmlText(p.id)}" title="Open ${escapeHtmlText(p.name)}">${escapeHtmlText(p.name)}</span>${list}</div>`;
-  }).join("");
-  return `<div class="tu-goals-card">
-    <div class="tu-goals-head"><span class="settings-section-title">Your project goals</span>${date}</div>
-    ${mine.length ? `<div class="tu-goals-list">${rows}</div>` : `<p class="summary-facts">No projects are assigned to ${escapeHtmlText(me)} yet.</p>`}
+  };
+  const projectCell = (p, withOwner) => `<div class="tu-goals-project-cell"><span class="project-link tu-goals-project" data-goto-project="${escapeHtmlText(p.id)}" title="Open ${escapeHtmlText(p.name)}">${escapeHtmlText(p.name)}</span>${withOwner ? `<span class="owner-badge">${escapeHtmlText(p.owner)}</span>` : ""}</div>`;
+  const date = goalsTargetDate ? ` <span class="tu-goals-date">for ${escapeHtmlText(formatDateWithYear(goalsTargetDate))}</span>` : "";
+
+  // Left: the projects I own. Right: the first ten (in the board's project order) owned by someone else.
+  let left;
+  if (!me){
+    left = `<p class="summary-facts">Couldn't tell which person you are — pick yourself on the My Tasks page and your projects' goals will show here.</p>`;
+  } else {
+    const mine = PROJECTS.filter(p => p.owner === me);
+    left = mine.length
+      ? `<div class="tu-goals-list">${mine.map(p => `<div class="tu-goals-row">${projectCell(p, false)}${goalsHtml(p)}</div>`).join("")}</div>`
+      : `<p class="summary-facts">No projects are assigned to ${escapeHtmlText(me)} yet.</p>`;
+  }
+  const others = PROJECTS.filter(p => p.owner && p.owner.trim() && p.owner !== me).slice(0, 10);
+  const right = others.length
+    ? `<div class="tu-goals-list">${others.map(p => `<div class="tu-goals-row">${projectCell(p, true)}${goalsHtml(p)}</div>`).join("")}</div>`
+    : `<p class="summary-facts">No projects are assigned to anyone else yet.</p>`;
+
+  return `<div class="tu-goals-grid">
+    <div class="tu-goals-card">
+      <div class="tu-goals-head"><span class="settings-section-title">Your project goals</span>${date}</div>
+      ${left}
+    </div>
+    <div class="tu-goals-card">
+      <div class="tu-goals-head"><span class="settings-section-title">Other people's projects</span><span class="tu-goals-date">top ${others.length}</span></div>
+      ${right}
+    </div>
   </div>`;
 }
 async function renderTeamUpdates(){
