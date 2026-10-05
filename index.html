@@ -1124,6 +1124,24 @@
   }
   .goals-date-editable:hover{ filter:brightness(0.97); }
   .goals-date-input{ font: inherit; font-size:13px; }
+  /* Team update page: the goals of the signed-in person's projects. */
+  .tu-goals-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow); padding:14px 18px; margin-bottom:16px;
+  }
+  .tu-goals-head{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .tu-goals-head .settings-section-title{ margin-bottom:0; }
+  .tu-goals-date{ font-size:12px; color:var(--ink-3); }
+  .tu-goals-list{ display:flex; flex-direction:column; }
+  .tu-goals-row{
+    display:grid; grid-template-columns:minmax(120px, 200px) minmax(0, 1fr); gap:6px 16px;
+    padding:8px 0; border-top:1px solid var(--border); font-size:12.5px;
+  }
+  .tu-goals-row:first-child{ border-top:none; }
+  .tu-goals-project{ font-weight:600; }
+  .tu-goals-items{ margin:0; padding-left:18px; display:flex; flex-direction:column; gap:3px; color:var(--ink-2); }
+  .tu-goals-none{ color:var(--ink-3); font-style:italic; }
+  @media (max-width: 700px){ .tu-goals-row{ grid-template-columns:1fr; } }
   .goals-table-card{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:18px;
@@ -3788,6 +3806,30 @@ async function postTeamUpdate(){
     postBtn.disabled = false;
   }
 }
+// The goals of every project the signed-in person owns, for the Goals page's
+// current date — shown at the top of the Team update page. "Who am I" is the
+// same person the My Tasks page uses (picked there, else guessed from the
+// sign-in email).
+function buildTeamUpdateGoalsHtml(){
+  const me = myTasksPersonName();
+  if (!me){
+    return `<div class="tu-goals-card"><div class="tu-goals-head"><span class="settings-section-title">Your project goals</span></div>
+      <p class="summary-facts">Couldn't tell which person you are — pick yourself on the My Tasks page and your projects' goals will show here.</p></div>`;
+  }
+  const mine = PROJECTS.filter(p => p.owner === me);
+  const date = goalsTargetDate ? ` <span class="tu-goals-date">for ${escapeHtmlText(formatDateWithYear(goalsTargetDate))}</span>` : "";
+  const rows = mine.map(p => {
+    const goals = [1, 2, 3].map(slot => goalText(p.id, slot)).filter(Boolean);
+    const list = goals.length
+      ? `<ol class="tu-goals-items">${goals.map(g => `<li>${escapeHtmlText(g)}</li>`).join("")}</ol>`
+      : `<span class="tu-goals-none">No goals set yet</span>`;
+    return `<div class="tu-goals-row"><span class="project-link tu-goals-project" data-goto-project="${escapeHtmlText(p.id)}" title="Open ${escapeHtmlText(p.name)}">${escapeHtmlText(p.name)}</span>${list}</div>`;
+  }).join("");
+  return `<div class="tu-goals-card">
+    <div class="tu-goals-head"><span class="settings-section-title">Your project goals</span>${date}</div>
+    ${mine.length ? `<div class="tu-goals-list">${rows}</div>` : `<p class="summary-facts">No projects are assigned to ${escapeHtmlText(me)} yet.</p>`}
+  </div>`;
+}
 async function renderTeamUpdates(){
   if (!hasPageAccess("teamupdate")) return;
   if (!supabaseClient || !authSession){
@@ -3795,11 +3837,17 @@ async function renderTeamUpdates(){
     return;
   }
   teamUpdatePanel.innerHTML = `<p class="summary-facts">Loading…</p>`;
-  const { data, error } = await supabaseClient
-    .from("team_updates")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const [{ data, error }, , settingsRes] = await Promise.all([
+    supabaseClient
+      .from("team_updates")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(200),
+    loadGoalsData(),   // best-effort: without it the goals card just shows nothing set
+    // Which person "I" am, if picked on the My Tasks page (best-effort too).
+    supabaseClient.from("personal_task_settings").select("person_name").eq("user_id", authSession.user.id).maybeSingle(),
+  ]);
+  if (settingsRes && !settingsRes.error && settingsRes.data && settingsRes.data.person_name) myTasksPersonSetting = settingsRes.data.person_name;
   if (currentId !== "teamupdate") return; // user navigated away while this was loading
   if (error){
     teamUpdatePanel.innerHTML = `<p class="summary-facts">Couldn't load team updates — has supabase-team-updates.sql been run yet?</p>`;
@@ -3810,6 +3858,7 @@ async function renderTeamUpdates(){
   const myTodayEntry = data.find(entry => entry.created_by === myEmail && (entry.update_date || entry.created_at.slice(0, 10)) === todayStr) || null;
 
   teamUpdatePanel.innerHTML = `
+    ${buildTeamUpdateGoalsHtml()}
     <div class="summary-intro">
       <p>${myTodayEntry ? "Updates for the team, most recent first." : "Post your update for today to see everyone else's."}</p>
       <button type="button" class="btn btn-new" id="refreshTeamUpdatesBtn">↻ Refresh</button>
