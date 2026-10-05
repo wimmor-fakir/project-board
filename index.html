@@ -1126,10 +1126,18 @@
   .goals-date-input{ font: inherit; font-size:13px; }
   /* Team update page: the goals of the signed-in person's projects. */
   .tu-goals-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; margin-bottom:16px; }
-  @media (max-width: 900px){ .tu-goals-grid{ grid-template-columns:1fr; } }
+  /* Each card is at most 40% of the window's height — its list scrolls inside it,
+     heading kept in view. Stacked on a narrow window they share that 40% instead. */
   .tu-goals-card{
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow); padding:14px 18px;
+    display:flex; flex-direction:column; max-height:40vh; min-height:0;
+  }
+  .tu-goals-card .tu-goals-head{ flex:none; }
+  .tu-goals-card .tu-goals-list, .tu-goals-card > .summary-facts{ overflow-y:auto; min-height:0; scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent; }
+  @media (max-width: 900px){
+    .tu-goals-grid{ grid-template-columns:1fr; }
+    .tu-goals-card{ max-height:max(20vh, 150px); }
   }
   .tu-goals-project-cell{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
   .tu-goals-head{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
