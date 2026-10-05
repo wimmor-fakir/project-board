@@ -3832,7 +3832,7 @@ function buildTeamUpdateGoalsHtml(){
   const projectCell = (p, withOwner) => `<div class="tu-goals-project-cell"><span class="project-link tu-goals-project" data-goto-project="${escapeHtmlText(p.id)}" title="Open ${escapeHtmlText(p.name)}">${escapeHtmlText(p.name)}</span>${withOwner ? `<span class="owner-badge">${escapeHtmlText(p.owner)}</span>` : ""}</div>`;
   const date = goalsTargetDate ? ` <span class="tu-goals-date">for ${escapeHtmlText(formatDateWithYear(goalsTargetDate))}</span>` : "";
 
-  // Left: the projects I own. Right: the first ten (in the board's project order) owned by someone else.
+  // Left: the projects I own. Right: every project owned by someone else, in the board's project order.
   let left;
   if (!me){
     left = `<p class="summary-facts">Couldn't tell which person you are — pick yourself on the My Tasks page and your projects' goals will show here.</p>`;
@@ -3842,7 +3842,7 @@ function buildTeamUpdateGoalsHtml(){
       ? `<div class="tu-goals-list">${mine.map(p => `<div class="tu-goals-row">${projectCell(p, false)}${goalsHtml(p)}</div>`).join("")}</div>`
       : `<p class="summary-facts">No projects are assigned to ${escapeHtmlText(me)} yet.</p>`;
   }
-  const others = PROJECTS.filter(p => p.owner && p.owner.trim() && p.owner !== me).slice(0, 10);
+  const others = PROJECTS.filter(p => p.owner && p.owner.trim() && p.owner !== me);
   const right = others.length
     ? `<div class="tu-goals-list">${others.map(p => `<div class="tu-goals-row">${projectCell(p, true)}${goalsHtml(p)}</div>`).join("")}</div>`
     : `<p class="summary-facts">No projects are assigned to anyone else yet.</p>`;
@@ -3853,7 +3853,7 @@ function buildTeamUpdateGoalsHtml(){
       ${left}
     </div>
     <div class="tu-goals-card">
-      <div class="tu-goals-head"><span class="settings-section-title">Other people's projects</span><span class="tu-goals-date">top ${others.length}</span></div>
+      <div class="tu-goals-head"><span class="settings-section-title">Other people's projects</span><span class="tu-goals-date">${others.length} project${others.length === 1 ? "" : "s"}</span></div>
       ${right}
     </div>
   </div>`;
