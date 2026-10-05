@@ -4656,6 +4656,10 @@ function totalForecastRevenue(month){
 /* ---------- Goals ---------- */
 let goalsTargetDate = null; // shared "date for next goals" — same for every project
 let projectGoals = {}; // projectGoals[projectId][slot 1-3] = text
+// Goals are kept for every date they have been set for: changing the date saves
+// the current date's goals and shows the new date's (see supabase-goals-history.sql).
+let goalsSavedDates = [];          // dates with saved goals, newest first (includes the current date once it has been switched away from and back)
+let goalsHistoryAvailable = false; // false until supabase-goals-history.sql has been run
 const goalsOwnerFilter = new Set();
 function toggleGoalsOwnerFilter(value){
   if (goalsOwnerFilter.has(value)) goalsOwnerFilter.delete(value); else goalsOwnerFilter.add(value);
@@ -4681,6 +4685,10 @@ async function loadGoalsData(){
       if (!projectGoals[row.project_id]) projectGoals[row.project_id] = {};
       projectGoals[row.project_id][row.slot] = row.text;
     });
+    // The saved dates are optional: without the history table the page works as before.
+    const history = await supabaseClient.from("project_goals_history").select("target_date");
+    goalsHistoryAvailable = !history.error;
+    goalsSavedDates = history.error ? [] : [...new Set((history.data || []).map(r => String(r.target_date).slice(0, 10)))].sort().reverse();
     return true;
   } catch (e) {
     return false;
@@ -4731,6 +4739,31 @@ async function saveGoalsDate(dateStr){
     alert("Couldn't save the goals date — has supabase-goals.sql been run yet? (" + e.message + ")");
   }
 }
+// Switches the goals to another date. The goals as they are now are saved under
+// the date they were for, and the new date's saved goals come up (blank when that
+// date has none) — all in one database step. Without the history table it just
+// sets the date, like before.
+async function changeGoalsDate(dateStr){
+  if (!dateStr || dateStr === goalsTargetDate) return;
+  if (!goalsHistoryAvailable){
+    await saveGoalsDate(dateStr);
+    return;
+  }
+  if (goalsTargetDate && !goalsSavedDates.includes(dateStr)){
+    const ok = window.confirm(
+      `Switch the goals to ${formatDateWithYear(dateStr)}?\n\n` +
+      `The goals for ${formatDateWithYear(goalsTargetDate)} are saved, and come back whenever you pick that date again. ` +
+      `${formatDateWithYear(dateStr)} has no saved goals yet, so it starts blank.`
+    );
+    if (!ok) return;
+  }
+  const { error } = await supabaseClient.rpc("change_goals_date", { p_new_date: dateStr });
+  if (error){
+    alert("Couldn't change the goals date: " + error.message);
+    return;
+  }
+  await loadGoalsData();
+}
 async function saveProjectGoal(projectId, slot, text){
   if (!projectGoals[projectId]) projectGoals[projectId] = {};
   projectGoals[projectId][slot] = text;
@@ -4762,7 +4795,7 @@ function openInlineGoalsDateEditor(dateEl){
     if (settled) return;
     settled = true;
     if (input.value && input.value !== goalsTargetDate){
-      await saveGoalsDate(input.value);
+      await changeGoalsDate(input.value);
     }
     rerenderGoalsViews();
   };
@@ -4811,6 +4844,10 @@ function renderGoalsContent(){
   const ownerChips = owners.map(name => `
     <button type="button" class="filter-btn ${goalsOwnerFilter.has(name) ? "active" : ""}" data-goals-owner-filter data-value="${name}">${name}</button>
   `).join("");
+  const earlierDates = goalsSavedDates.filter(d => d !== goalsTargetDate);
+  const savedDateChips = earlierDates.map(d => `
+    <button type="button" class="filter-btn" data-goals-saved-date data-value="${d}" title="Bring back the goals saved for this date">${formatDateWithYear(d)}</button>
+  `).join("");
   goalsPanel.innerHTML = `
     <div class="summary-intro">
       <p>Up to 3 goals per project, for the current target date.</p>
@@ -4818,8 +4855,14 @@ function renderGoalsContent(){
     </div>
     <div class="goals-date-card">
       <span class="goals-date-label">Date for next goals</span>
-      <span class="goals-date-value goals-date-editable" data-edit-goals-date title="Click to change the target date">${goalsTargetDate ? formatDateWithYear(goalsTargetDate) : "Not set"}</span>
+      <span class="goals-date-value goals-date-editable" data-edit-goals-date title="Click to change the target date — the goals for the current date are saved first, and come back when you pick it again">${goalsTargetDate ? formatDateWithYear(goalsTargetDate) : "Not set"}</span>
     </div>
+    ${earlierDates.length ? `
+    <div class="action-filter-row">
+      <span class="filter-label">Saved dates</span>
+      <div class="filter-group" role="group" aria-label="Earlier dates whose goals you can bring back">${savedDateChips}</div>
+    </div>` : ""}
+    ${goalsHistoryAvailable ? "" : `<p class="field-hint">Run supabase-goals-history.sql in Supabase to keep each date's goals when the date changes — until then, changing the date leaves the goals as they are.</p>`}
     <div class="action-filter-row">
       <span class="filter-label">Owner</span>
       <div class="filter-group" role="group" aria-label="Filter by owner (select any number)">${ownerChips}</div>
@@ -8411,6 +8454,11 @@ document.addEventListener("click", (e) => {
   const editGoalEl = e.target.closest("[data-edit-goal]");
   if (editGoalEl){
     openInlineGoalEditor(editGoalEl, editGoalEl.dataset.editGoal, Number(editGoalEl.dataset.goalSlot));
+    return;
+  }
+  const goalsSavedDateBtn = e.target.closest("[data-goals-saved-date]");
+  if (goalsSavedDateBtn){
+    changeGoalsDate(goalsSavedDateBtn.dataset.value).then(rerenderGoalsViews);
     return;
   }
   const goalsOwnerFilterBtn = e.target.closest("[data-goals-owner-filter]");

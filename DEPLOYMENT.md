@@ -60,6 +60,10 @@ when you open the live site** — all one-time, no-code steps:
    page. Every project can have up to 3 goals, all set for one shared
    "date for next goals" (the same date applies to every project, editable
    at the top of the page).
+   - **Then run `supabase-goals-history.sql`** — keeps each date's goals:
+     when the date is changed, the goals for the old date are saved, and
+     choosing that date again brings them back (a date with nothing saved
+     starts blank).
 6. **Run `supabase-leave.sql`** too — creates the table behind the Leave
    page (one row per person: BOP — Balance at start Of Period — and
    PaySpace Entitlement, both entered manually (Entitlement defaults to
@@ -530,6 +534,7 @@ typed.
 | Already had an earlier one-line-per-project version? Run `supabase-migration-forecast-lines.sql` once | Moves existing forecasts onto an auto-created "Line 1" per project and updates the table structure — read its comments first, it changes a primary key |
 | Already had lines but no chart include/exclude checkbox? Run `supabase-migration-forecast-line-chart-toggle.sql` once | Adds that column, defaulting every existing line to included |
 | Run `supabase-goals.sql` too | Creates the tables behind the Goals page (up to 3 goals per project, all for one shared target date) |
+| Run `supabase-goals-history.sql` too | Saves each date's goals when the Goals date is changed, so choosing that date again brings them back |
 | Run `supabase-leave.sql` too | Creates the table behind the Leave page (BOP + PaySpace Entitlement (default 25, both editable) + PaySpace # per person; EOP = BOP + PaySpace Entitlement − PaySpace Applications) |
 | Already had an earlier version without the PaySpace # column? Run `supabase-migration-leave-payspace-number.sql` once | Adds that column |
 | Already had an earlier version with entitlement/applications/adjustments instead of BOP? Run `supabase-migration-leave-bop.sql` once | Adds the `bop` column — old data is kept, just no longer read/written |
