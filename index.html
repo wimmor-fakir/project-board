@@ -1315,6 +1315,13 @@
     color:var(--ink-3); margin-bottom:8px;
   }
   .simcard-usage-title{ margin-top:14px; }
+  .simcard-balance-history-title{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .simcard-axis-max{ display:inline-flex; align-items:center; gap:6px; font-weight:600; text-transform:none; letter-spacing:0; }
+  .simcard-axis-max input, .simcard-axis-max select{
+    font:inherit; font-size:11.5px; color:var(--ink); background:var(--surface);
+    border:1px solid var(--border); border-radius:6px; padding:2px 6px;
+  }
+  .simcard-axis-max input{ width:70px; }
   .simcard-balance-history-empty{ color:var(--ink-3); font-style:italic; font-size:12px; }
   .simcard-balance-chart{
     position:relative; background:var(--surface); border:1px solid var(--border);
@@ -3526,6 +3533,33 @@ function simTagClass(tag){
   return "";
 }
 const expandedSimBalanceHistory = new Set();
+// Optional fixed Y-axis maximum for the SIM charts, one per chart kind
+// ("balance" / "usage"), remembered in this browser. Stored as {value, unit};
+// blank = automatic scale.
+const SIM_AXIS_KEY = "simChartAxisMax";
+function simAxisSettings(){
+  try { return JSON.parse(localStorage.getItem(SIM_AXIS_KEY) || "{}") || {}; } catch (e){ return {}; }
+}
+function simAxisMaxMb(kind){
+  const s = simAxisSettings()[kind];
+  const v = s ? Number(s.value) : NaN;
+  if (!(v > 0)) return null;
+  return v * (s.unit === "GB" ? 1024 : 1);
+}
+function saveSimAxisMax(kind, value, unit){
+  const all = simAxisSettings();
+  const v = Number(value);
+  if (v > 0) all[kind] = { value: v, unit: unit === "GB" ? "GB" : "MB" }; else delete all[kind];
+  try { localStorage.setItem(SIM_AXIS_KEY, JSON.stringify(all)); } catch (e){}
+}
+function simAxisMaxControlHtml(kind){
+  const s = simAxisSettings()[kind] || {};
+  const has = Number(s.value) > 0;
+  return `<label class="simcard-axis-max" title="Fix the top of the Y axis. Leave blank for automatic.">Y max
+    <input type="number" min="0" step="any" class="simcard-axis-max-input" data-axis-kind="${kind}" value="${has ? s.value : ""}" placeholder="auto">
+    <select class="simcard-axis-max-unit" data-axis-kind="${kind}"><option value="MB"${s.unit === "GB" ? "" : " selected"}>MB</option><option value="GB"${s.unit === "GB" ? " selected" : ""}>GB</option></select>
+  </label>`;
+}
 function buildSimCardRow(sim, maxYesterdayUsage, earliestRunoutDate){
   const row = document.createElement("tr");
   const suspended = !!sim.suspended_at;
@@ -3567,12 +3601,20 @@ function buildSimCardBalanceHistoryRow(sim){
   row.innerHTML = `
     <td colspan="${SIMCARD_COLUMNS.length}">
       <div class="simcard-balance-history">
-        <div class="simcard-balance-history-title">${title}</div>
+        <div class="simcard-balance-history-title"><span>${title}</span>${history.length ? simAxisMaxControlHtml("balance") : ""}</div>
         ${history.length ? buildSimBalanceChartHtml(history) : `<div class="simcard-balance-history-empty">No recorded history yet — this builds up one day at a time.</div>`}
-        ${usageChartHtml ? `<div class="simcard-balance-history-title simcard-usage-title">Daily usage — drop in balance since the day before; recharge days are left blank</div>${usageChartHtml}` : ""}
+        ${usageChartHtml ? `<div class="simcard-balance-history-title simcard-usage-title"><span>Daily usage — drop in balance since the day before; recharge days are left blank</span>${simAxisMaxControlHtml("usage")}</div>${usageChartHtml}` : ""}
       </div>
     </td>
   `;
+  // Committing a Y max (Enter / leaving the box / changing the unit) redraws
+  // every open chart, since the setting is shared by all SIMs.
+  row.querySelectorAll(".simcard-axis-max").forEach(label => {
+    const input = label.querySelector("input"), unit = label.querySelector("select");
+    const commit = () => { saveSimAxisMax(input.dataset.axisKind, input.value, unit.value); renderSimCardsTableOnly(); };
+    input.addEventListener("change", commit);
+    unit.addEventListener("change", commit);
+  });
   row.querySelectorAll(".simcard-balance-chart").forEach(wireSimBalanceChartTooltip);
   return row;
 }
@@ -3584,7 +3626,7 @@ function buildSimBalanceChartHtml(history){
   // rather than being silently squeezed out of the x axis.
   const days = [];
   for (let d = sortedDates[0]; d <= sortedDates[sortedDates.length - 1]; d = addDaysToDateStr(d, 1)) days.push(d);
-  return buildSimBarChartHtml({ days, byDate, estimatedDates, missingText: "No reading", estimateNote: "Striped bars are estimates — no reading was taken that day." });
+  return buildSimBarChartHtml({ days, byDate, estimatedDates, missingText: "No reading", axisKind: "balance", estimateNote: "Striped bars are estimates — no reading was taken that day." });
 }
 // Daily usage, worked out from the stored daily balances: a day's usage is how
 // far the balance dropped since the day before. A rise is a recharge (usage
@@ -3607,16 +3649,19 @@ function buildSimUsageChartHtml(history){
     if (estimatedBal.has(d) || estimatedBal.has(prev)) estimatedDates.add(d);
   });
   if (!byDate.size) return null;
-  return buildSimBarChartHtml({ days, byDate, estimatedDates, missingText: "No usage figure", missingTextByDate, estimateNote: "Striped bars are estimates — one of the two balance readings was estimated." });
+  return buildSimBarChartHtml({ days, byDate, estimatedDates, missingText: "No usage figure", axisKind: "usage", missingTextByDate, estimateNote: "Striped bars are estimates — one of the two balance readings was estimated." });
 }
-function buildSimBarChartHtml({ days, byDate, estimatedDates, missingText, missingTextByDate, estimateNote }){
-  const maxBalance = Math.max(0, ...byDate.values());
+function buildSimBarChartHtml({ days, byDate, estimatedDates, missingText, missingTextByDate, estimateNote, axisKind }){
+  // A typed-in Y max (see simAxisMaxMb) overrides the automatic scale; bars
+  // above it are cut off at the top of the chart.
+  const fixedMaxMb = simAxisMaxMb(axisKind);
+  const maxBalance = fixedMaxMb || Math.max(0, ...byDate.values());
   const unit = maxBalance >= 1024 ? 1024 : 1;
   const unitLabel = unit === 1024 ? "GB" : "MB";
   const rawStep = (maxBalance / unit) / 4 || 1;
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
-  const niceStep = Math.ceil(rawStep / magnitude) * magnitude;
-  const axisMaxMb = niceStep * 4 * unit;
+  const niceStep = fixedMaxMb ? rawStep : Math.ceil(rawStep / magnitude) * magnitude;
+  const axisMaxMb = fixedMaxMb || niceStep * 4 * unit;
 
   let gridlines = "";
   for (let i = 0; i <= 4; i++){
@@ -3626,9 +3671,9 @@ function buildSimBarChartHtml({ days, byDate, estimatedDates, missingText, missi
   const slots = days.map(d => {
     const has = byDate.has(d);
     const value = byDate.get(d);
-    const pct = has && value > 0 ? Math.max((value / axisMaxMb) * 100, 1) : 0;
+    const pct = has && value > 0 ? Math.min(Math.max((value / axisMaxMb) * 100, 1), 100) : 0;
     const isEstimate = has && estimatedDates.has(d);
-    const valueText = has ? formatDataMb(value) + (isEstimate ? " (estimate)" : "") : ((missingTextByDate && missingTextByDate.get(d)) || missingText);
+    const valueText = has ? formatDataMb(value) + (isEstimate ? " (estimate)" : "") + (value > axisMaxMb ? " — above the Y max" : "") : ((missingTextByDate && missingTextByDate.get(d)) || missingText);
     const stateClass = (!has ? " is-missing" : value > 0 ? "" : " is-zero") + (isEstimate ? " is-estimate" : "");
     return `<div class="simcard-balance-chart-slot${stateClass}" tabindex="0" data-date="${formatDateWithYear(d)}" data-value="${valueText}" aria-label="${formatDateWithYear(d)}: ${valueText}"><div class="simcard-balance-chart-bar" style="height:${pct}%"></div></div>`;
   }).join("");
